@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  collection:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.collection
+    container_name: job-collection
+    environment:
+      - DB_PATH=/data/jobs.db
+      - GREENHOUSE_BOARD_TOKENS=${GREENHOUSE_BOARD_TOKENS}
+      - REQUEST_TIMEOUT=30
+      - MAX_RETRIES=3
+      - RETRY_BACKOFF=2.0
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../data:/data
+    networks:
+      - job-pipeline
+    restart: "no"
+
+  preprocessing:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.preprocessing
+    container_name: job-preprocessing
+    environment:
+      - DB_PATH=/data/jobs.db
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../data:/data
+    networks:
+      - job-pipeline
+    depends_on:
+      - collection
+    restart: "no"
+
+networks:
+  job-pipeline:
+    driver: bridge

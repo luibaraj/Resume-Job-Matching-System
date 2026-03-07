@@ -1,0 +1,21 @@
+services:
+  airflow:
+    image: apache/airflow:2.9.3-python3.11
+    container_name: airflow
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "changeme"
+    volumes:
+      - ../airflow:/opt/airflow/dags
+      - /var/run/docker.sock:/var/run/docker.sock
+      - airflow_home:/opt/airflow
+      - ../data:/data
+    ports:
+      - "8080:8080"
+    command: standalone
+
+volumes:
+  airflow_home:

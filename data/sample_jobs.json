@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "board_token": "example-company",
+    "fetched_at": "2026-03-05T12:00:00Z",
+    "total_jobs": 2
+  },
+  "jobs": [
+    {
+      "id": 4001234,
+      "title": "Software Engineer, Backend",
+      "updated_at": "2026-02-28T18:00:00-05:00",
+      "location": {
+        "name": "San Francisco, CA or Remote"
+      },
+      "content": "<div class=\"content-intro\"><p>We&apos;re hiring a Backend Engineer to join our platform team.</p></div><div><h2>Responsibilities</h2><ul><li>Design &amp; implement scalable APIs</li><li>Collaborate with frontend &amp; data teams</li></ul><h2>Requirements</h2><ul><li>3+ years Python experience</li><li>Familiarity with SQL &amp; NoSQL databases</li></ul></div>",
+      "absolute_url": "https://boards.greenhouse.io/example-company/jobs/4001234",
+      "departments": [
+        {
+          "id": 10,
+          "name": "Engineering"
+        }
+      ],
+      "offices": [
+        {
+          "id": 22,
+          "name": "San Francisco"
+        }
+      ],
+      "metadata": []
+    },
+    {
+      "id": 4001235,
+      "title": "Data Engineer",
+      "updated_at": "2026-03-01T09:00:00-05:00",
+      "location": {
+        "name": "New York, NY"
+      },
+      "content": "<p>We&apos;re looking for a Data Engineer.&nbsp;</p><ul><li>Apache Spark &amp; Kafka</li>• Strong Python skills<li>ETL pipeline design</li></ul>",
+      "absolute_url": "https://boards.greenhouse.io/example-company/jobs/4001235",
+      "departments": [
+        {
+          "id": 11,
+          "name": "Data"
+        }
+      ],
+      "offices": [
+        {
+          "id": 23,
+          "name": "New York"
+        }
+      ],
+      "metadata": []
+    }
+  ]
+}

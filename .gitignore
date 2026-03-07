@@ -36,3 +36,12 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Bind mount directory — track dir via .gitkeep, ignore contents
+data/*
+!data/.gitkeep

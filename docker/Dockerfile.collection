@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+# Non-root user for security
+RUN useradd -m -u 1000 pipeline
+
+WORKDIR /app
+
+# Install collection dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir requests urllib3
+
+# Copy source
+COPY src/config.py src/database.py src/utils.py src/collection.py src/
+
+USER pipeline
+
+ENTRYPOINT ["python", "-m", "src.collection"]
