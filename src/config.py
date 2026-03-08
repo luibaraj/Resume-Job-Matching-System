@@ -40,6 +40,9 @@ class Config:
     preprocessing_chunk_size: int = field(
         default_factory=lambda: int(os.environ.get("PREPROCESSING_CHUNK_SIZE", "500"))
     )
+    preprocessing_max_retries: int = field(
+        default_factory=lambda: int(os.environ.get("PREPROCESSING_MAX_RETRIES", "2"))
+    )
 
     # Logging
     log_level: str = field(
@@ -58,4 +61,6 @@ def load_config() -> Config:
         raise ValueError("PREPROCESSING_WORKERS must be >= 1")
     if config.preprocessing_chunk_size < 1:
         raise ValueError("PREPROCESSING_CHUNK_SIZE must be >= 1")
+    if config.preprocessing_max_retries < 0:
+        raise ValueError("PREPROCESSING_MAX_RETRIES must be >= 0")
     return config

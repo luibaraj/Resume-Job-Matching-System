@@ -17,6 +17,28 @@ HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 MULTI_SPACE_PATTERN = re.compile(r"[ \t\xa0]+")
 MULTI_NEWLINE_PATTERN = re.compile(r"\n{3,}")
 
+# Location standardization constants
+GENERIC_LOCATIONS: frozenset[str] = frozenset({
+    "united states", "us", "usa", "u.s.", "u.s.a.",
+    "hybrid", "remote", "unknown", "not specified"
+})
+
+STATE_ABBREVIATIONS: dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC",
+}
+
 
 def decode_html_entities(text: str) -> str:
     """Decode HTML entities to their Unicode equivalents.
@@ -103,6 +125,62 @@ def normalize_whitespace(text: str) -> str:
     return text
 
 
+def normalize_location(location: str | None) -> str | None:
+    """Standardize job location strings to a consistent format.
+
+    Handles:
+    - Remote variants: "Remote - USA", "Remote - US" → "Remote"
+    - State abbreviation expansion: "City, California" → "City, CA"
+    - Generic/useless locations: "United States", "Hybrid" → None
+    - Whitespace normalization: leading/trailing/internal
+
+    Args:
+        location: Raw location string or None
+
+    Returns:
+        Standardized location string or None if input is None/empty/generic
+    """
+    if not location:
+        return None
+
+    # Normalize whitespace and casing
+    cleaned = MULTI_SPACE_PATTERN.sub(" ", location).strip()
+    if not cleaned:
+        return None
+
+    # Detect and standardize remote variants
+    if "remote" in cleaned.lower():
+        return "Remote"
+
+    # Expand state abbreviations (only the last segment after comma)
+    parts = cleaned.split(",")
+    if len(parts) > 1:
+        state_part = parts[-1].strip().lower()
+        if state_part in STATE_ABBREVIATIONS:
+            parts[-1] = STATE_ABBREVIATIONS[state_part]
+            cleaned = ", ".join(parts)
+            # Re-normalize whitespace after join
+            cleaned = MULTI_SPACE_PATTERN.sub(" ", cleaned).strip()
+
+    # Check for generic/useless locations (after state expansion)
+    if cleaned.lower() in GENERIC_LOCATIONS:
+        return None
+
+    return cleaned
+
+
+def clean_title(title: str) -> str:
+    """Normalize job title whitespace: collapse multiple spaces to single space and trim.
+
+    Args:
+        title: Raw title string
+
+    Returns:
+        Title with normalized whitespace
+    """
+    return MULTI_SPACE_PATTERN.sub(" ", title).strip()
+
+
 def clean_job_description(raw_description: Optional[str]) -> str:
     """Orchestrator: run all four cleaning steps in sequence.
 
@@ -132,7 +210,7 @@ def clean_job_description(raw_description: Optional[str]) -> str:
     return text
 
 
-def _clean_record(record: tuple[int, str | None]) -> tuple[int, str] | None:
+def _clean_record(record: tuple[int, str | None, str | None, str]) -> tuple[int, str] | None:
     """Worker function for multiprocessing.Pool.
 
     Must be module-level (not a closure) for pickle serialization to worker processes.
@@ -141,12 +219,12 @@ def _clean_record(record: tuple[int, str | None]) -> tuple[int, str] | None:
     parent process's logging configuration.
 
     Args:
-        record: Tuple of (job_id, raw_description)
+        record: Tuple of (job_id, raw_description, location, title)
 
     Returns:
         Tuple of (job_id, cleaned_description) on success, None on exception
     """
-    job_id, raw_description = record
+    job_id, raw_description, *_ = record
     try:
         return (job_id, clean_job_description(raw_description))
     except Exception as e:
@@ -160,17 +238,20 @@ def _clean_record(record: tuple[int, str | None]) -> tuple[int, str] | None:
         return None
 
 
-def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_workers: int) -> tuple[int, int]:
+def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_workers: int, max_retries: int = 2) -> tuple[int, int]:
     """Read unpreprocessed jobs, clean descriptions in parallel, update DB in batches.
 
     Processes jobs in chunks using multiprocessing.Pool to parallelize CPU-bound
     text cleaning. Each chunk is processed independently and written to DB atomically.
+    Detects missing IDs (silent worker crashes) and retries them; fails the pipeline
+    if records still missing after retries.
 
     Args:
         db: DatabaseManager instance
         run_id: Pipeline run ID for audit logging
         chunk_size: Number of records to fetch per iteration
         num_workers: Number of worker processes in the pool
+        max_retries: Maximum retries for missing IDs; defaults to 2
 
     Returns:
         Tuple of (processed_count, error_count)
@@ -180,15 +261,14 @@ def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_worke
     logger = setup_logging(log_level=log_level, name="preprocess_jobs")
     total_processed = 0
     total_errors = 0
-    offset = 0
 
     while True:
-        # Fetch one chunk
-        records = db.get_unpreprocessed_jobs_chunked(chunk_size, offset)
+        # Fetch one chunk (always from offset 0 — committed rows drop out of WHERE preprocessed=0)
+        records = db.get_unpreprocessed_jobs_chunked(chunk_size, 0)
         if not records:
             break
 
-        logger.info(f"Processing chunk at offset {offset}: {len(records)} records")
+        logger.info(f"Processing chunk: {len(records)} records")
 
         # Process chunk in parallel
         updates = []
@@ -201,28 +281,67 @@ def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_worke
                 else:
                     updates.append(result)
 
+        # Track which IDs were returned vs what went in
+        input_ids = {record[0] for record in records}
+        output_ids = {result[0] for result in updates}
+        missing_ids = input_ids - output_ids
+
+        # Retry missing records up to max_retries times
+        for attempt in range(1, max_retries + 1):
+            if not missing_ids:
+                break
+
+            logger.warning(
+                "%d record(s) missing after pool run "
+                "(attempt %d/%d), retrying IDs: %s",
+                len(missing_ids), attempt, max_retries, sorted(missing_ids),
+            )
+
+            records_to_retry = [r for r in records if r[0] in missing_ids]
+            retry_updates = []
+
+            with multiprocessing.Pool(processes=num_workers) as pool:
+                for result in pool.imap(_clean_record, records_to_retry, chunksize=50):
+                    if result is not None:
+                        retry_updates.append(result)
+
+            updates.extend(retry_updates)
+            output_ids = {result[0] for result in updates}
+            missing_ids = input_ids - output_ids
+
+        # After all retries, if still missing — stop the pipeline
+        if missing_ids:
+            raise RuntimeError(
+                f"{len(missing_ids)} record(s) still missing "
+                f"after {max_retries} retries. Missing job IDs: {sorted(missing_ids)}"
+            )
+
+        # Build metadata lookup: id → (location, title) from original records
+        id_to_meta = {record[0]: (record[2], record[3]) for record in records}
+
+        # Apply location and title cleaning, then construct full updates
+        full_updates = [
+            (job_id, cleaned_desc, normalize_location(id_to_meta[job_id][0]), clean_title(id_to_meta[job_id][1]))
+            for job_id, cleaned_desc in updates
+        ]
+
         # Write results atomically, then free memory
-        if updates:
-            db.update_cleaned_descriptions_batch(updates)
+        if full_updates:
+            db.update_job_fields_batch(full_updates)
 
         total_processed += len(updates)
         total_errors += errors_in_chunk
 
         if errors_in_chunk > 0:
             logger.warning(
-                "Chunk at offset %d: %d record(s) failed (see _clean_record logs for details)",
-                offset,
+                "%d record(s) failed in this chunk (see _clean_record logs for details)",
                 errors_in_chunk,
             )
         logger.info(
-            "Chunk complete at offset %d: %d processed, %d errors",
-            offset,
+            "Chunk complete: %d processed, %d errors",
             len(updates),
             errors_in_chunk,
         )
-
-        # Advance offset
-        offset += len(records)
 
     logger.info(f"Preprocessing complete: {total_processed} processed, {total_errors} errors")
     return total_processed, total_errors
@@ -251,6 +370,7 @@ def main() -> None:
             db, run_id,
             chunk_size=config.preprocessing_chunk_size,
             num_workers=config.preprocessing_workers,
+            max_retries=config.preprocessing_max_retries,
         )
         db.finish_pipeline_run(
             run_id, "success", jobs_processed=processed, jobs_skipped=errors

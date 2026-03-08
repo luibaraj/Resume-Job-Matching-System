@@ -148,3 +148,27 @@ class TestPreprocessingConfig:
         monkeypatch.setenv("PREPROCESSING_CHUNK_SIZE", "-1")
         with pytest.raises(ValueError, match="PREPROCESSING_CHUNK_SIZE must be >= 1"):
             load_config()
+
+    def test_preprocessing_max_retries_default(self, monkeypatch):
+        """preprocessing_max_retries defaults to 2."""
+        monkeypatch.delenv("PREPROCESSING_MAX_RETRIES", raising=False)
+        config = load_config()
+        assert config.preprocessing_max_retries == 2
+
+    def test_preprocessing_max_retries_from_env(self, monkeypatch):
+        """Reads PREPROCESSING_MAX_RETRIES from environment."""
+        monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "5")
+        config = load_config()
+        assert config.preprocessing_max_retries == 5
+
+    def test_preprocessing_max_retries_zero_allowed(self, monkeypatch):
+        """PREPROCESSING_MAX_RETRIES=0 is valid (no retries)."""
+        monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "0")
+        config = load_config()
+        assert config.preprocessing_max_retries == 0
+
+    def test_preprocessing_max_retries_negative_raises(self, monkeypatch):
+        """Negative PREPROCESSING_MAX_RETRIES raises ValueError."""
+        monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "-1")
+        with pytest.raises(ValueError, match="PREPROCESSING_MAX_RETRIES must be >= 0"):
+            load_config()

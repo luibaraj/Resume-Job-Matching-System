@@ -146,25 +146,25 @@ class DatabaseManager:
             )
             return cursor.fetchall()
 
-    def get_unpreprocessed_jobs_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str | None]]:
-        """Fetch a chunk of unpreprocessed jobs by id and raw_description only.
+    def get_unpreprocessed_jobs_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str | None, str | None, str]]:
+        """Fetch a chunk of unpreprocessed jobs with id, raw_description, location, and title.
 
-        Returns plain tuples (id, raw_description) instead of sqlite3.Row objects
-        for compatibility with multiprocessing.Pool (rows are not picklable).
+        Returns plain tuples instead of sqlite3.Row objects for compatibility with
+        multiprocessing.Pool (rows are not picklable).
 
         Args:
             chunk_size: Number of records to fetch
             offset: Number of records to skip
 
         Returns:
-            List of (id, raw_description) tuples
+            List of (id, raw_description, location, title) tuples
         """
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT id, raw_description FROM jobs WHERE preprocessed = 0 ORDER BY id LIMIT ? OFFSET ?",
+                "SELECT id, raw_description, location, title FROM jobs WHERE preprocessed = 0 ORDER BY id LIMIT ? OFFSET ?",
                 (chunk_size, offset),
             )
-            return [(row[0], row[1]) for row in cursor.fetchall()]
+            return [(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
 
     def update_cleaned_description(self, job_id: int, cleaned: str) -> None:
         """Update cleaned_description and set preprocessed = 1 for a job.
@@ -247,6 +247,29 @@ class DatabaseManager:
                 """
                 UPDATE jobs
                 SET cleaned_description = ?, preprocessed = 1
+                WHERE id = ?
+                """,
+                rows,
+            )
+
+    def update_job_fields_batch(self, updates: list[tuple[int, str, str | None, str]]) -> None:
+        """Update cleaned_description, location, title, and set preprocessed=1 in one transaction.
+
+        Args:
+            updates: List of (job_id, cleaned_description, cleaned_location, cleaned_title) tuples
+        """
+        if not updates:
+            return
+
+        rows = [
+            (cleaned_desc, cleaned_loc, cleaned_title, job_id)
+            for job_id, cleaned_desc, cleaned_loc, cleaned_title in updates
+        ]
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                UPDATE jobs
+                SET cleaned_description = ?, location = ?, title = ?, preprocessed = 1
                 WHERE id = ?
                 """,
                 rows,

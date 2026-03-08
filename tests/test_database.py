@@ -684,11 +684,16 @@ class TestGetUnpreprocessedJobsChunked:
         assert len(result) == 1
         assert isinstance(result[0], tuple)
 
-    def test_only_id_and_raw_description_in_tuple(self, db_manager: DatabaseManager, normalized_job: dict):
-        """Each tuple has exactly 2 elements."""
+    def test_tuple_contains_id_raw_desc_location_title(self, db_manager: DatabaseManager, normalized_job: dict):
+        """Each tuple has exactly 4 elements: (id, raw_description, location, title)."""
         db_manager.insert_job(normalized_job)
         result = db_manager.get_unpreprocessed_jobs_chunked(chunk_size=10, offset=0)
-        assert len(result[0]) == 2
+        assert len(result[0]) == 4
+        job_id, raw_desc, location, title = result[0]
+        assert isinstance(job_id, int)
+        assert isinstance(raw_desc, (str, type(None)))
+        assert isinstance(location, (str, type(None)))
+        assert isinstance(title, str)
 
     def test_excludes_preprocessed_jobs(self, db_manager: DatabaseManager, normalized_job: dict):
         """Only jobs with preprocessed=0 are returned."""
@@ -727,8 +732,16 @@ class TestGetUnpreprocessedJobsChunked:
         """raw_description is correctly retrieved in the tuple."""
         db_manager.insert_job(normalized_job)
         result = db_manager.get_unpreprocessed_jobs_chunked(chunk_size=10, offset=0)
-        job_id, raw_desc = result[0]
+        job_id, raw_desc, location, title = result[0]
         assert raw_desc == normalized_job["raw_description"]
+
+    def test_location_and_title_values_preserved(self, db_manager: DatabaseManager, normalized_job: dict):
+        """location and title are correctly retrieved in the tuple."""
+        db_manager.insert_job(normalized_job)
+        result = db_manager.get_unpreprocessed_jobs_chunked(chunk_size=10, offset=0)
+        job_id, raw_desc, location, title = result[0]
+        assert location == normalized_job["location"]
+        assert title == normalized_job["title"]
 
 
 class TestUpdateCleanedDescriptionsBatch:
@@ -806,3 +819,81 @@ class TestUpdateCleanedDescriptionsBatch:
                 "SELECT COUNT(*) FROM jobs WHERE preprocessed = 1 AND greenhouse_id IN (6000, 6001)"
             )
             assert cursor.fetchone()[0] == 2
+
+
+class TestUpdateJobFieldsBatch:
+    """Tests for DatabaseManager.update_job_fields_batch()."""
+
+    def test_updates_all_fields(self, db_manager: DatabaseManager, normalized_job: dict):
+        """All jobs in batch are updated with cleaned_description, location, title, and preprocessed=1."""
+        jobs = [dict(normalized_job) for _ in range(2)]
+        jobs[0]["greenhouse_id"] = 7000
+        jobs[1]["greenhouse_id"] = 7001
+        db_manager.insert_jobs_batch(jobs)
+
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT id FROM jobs WHERE greenhouse_id IN (7000, 7001) ORDER BY id")
+            job_ids = [row["id"] for row in cursor.fetchall()]
+
+        # Batch update with new values
+        updates = [
+            (job_ids[0], "cleaned_0", "Remote", "Senior Engineer"),
+            (job_ids[1], "cleaned_1", "San Francisco, CA", "Junior Dev"),
+        ]
+        db_manager.update_job_fields_batch(updates)
+
+        # Verify all updated
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT cleaned_description, location, title, preprocessed FROM jobs WHERE id IN (?, ?)",
+                job_ids,
+            )
+            rows = cursor.fetchall()
+            assert len(rows) == 2
+            assert rows[0]["cleaned_description"] == "cleaned_0"
+            assert rows[0]["location"] == "Remote"
+            assert rows[0]["title"] == "Senior Engineer"
+            assert rows[0]["preprocessed"] == 1
+
+            assert rows[1]["cleaned_description"] == "cleaned_1"
+            assert rows[1]["location"] == "San Francisco, CA"
+            assert rows[1]["title"] == "Junior Dev"
+            assert rows[1]["preprocessed"] == 1
+
+    def test_empty_list_is_noop(self, db_manager: DatabaseManager):
+        """Empty updates list causes no error."""
+        db_manager.update_job_fields_batch([])  # Should not raise
+
+    def test_null_location_allowed(self, db_manager: DatabaseManager, normalized_job: dict):
+        """location=None is allowed and properly set to NULL in database."""
+        db_manager.insert_job(normalized_job)
+
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT id FROM jobs")
+            job_id = cursor.fetchone()["id"]
+
+        updates = [(job_id, "cleaned", None, "New Title")]
+        db_manager.update_job_fields_batch(updates)
+
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT location FROM jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            assert row["location"] is None
+
+    def test_does_not_affect_other_jobs(self, db_manager: DatabaseManager, normalized_job: dict):
+        """Jobs not in updates list remain preprocessed=0."""
+        jobs = [dict(normalized_job) for _ in range(2)]
+        jobs[0]["greenhouse_id"] = 8000
+        jobs[1]["greenhouse_id"] = 8001
+        db_manager.insert_jobs_batch(jobs)
+
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT id FROM jobs WHERE greenhouse_id = 8000")
+            job_id = cursor.fetchone()["id"]
+
+        updates = [(job_id, "cleaned", "NY, NY", "Engineer")]
+        db_manager.update_job_fields_batch(updates)
+
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT preprocessed FROM jobs WHERE greenhouse_id = 8001")
+            assert cursor.fetchone()["preprocessed"] == 0
