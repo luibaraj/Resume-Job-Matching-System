@@ -9,6 +9,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: "changeme"
     volumes:
+      - ../:/project
       - ../airflow:/opt/airflow/dags
       - /var/run/docker.sock:/var/run/docker.sock
       - airflow_home:/opt/airflow

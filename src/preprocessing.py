@@ -1,6 +1,7 @@
 import html
 import multiprocessing
 import re
+import traceback
 from typing import Optional
 
 from src.config import load_config
@@ -136,6 +137,8 @@ def _clean_record(record: tuple[int, str | None]) -> tuple[int, str] | None:
 
     Must be module-level (not a closure) for pickle serialization to worker processes.
     Returns None on exception to enable per-record fault tolerance.
+    Configures its own logger because worker processes do not inherit the
+    parent process's logging configuration.
 
     Args:
         record: Tuple of (job_id, raw_description)
@@ -146,7 +149,14 @@ def _clean_record(record: tuple[int, str | None]) -> tuple[int, str] | None:
     job_id, raw_description = record
     try:
         return (job_id, clean_job_description(raw_description))
-    except Exception:
+    except Exception as e:
+        logger = setup_logging(name="_clean_record")
+        logger.exception(
+            "Failed to clean record job_id=%s: %s: %s",
+            job_id,
+            type(e).__name__,
+            e,
+        )
         return None
 
 
@@ -165,7 +175,9 @@ def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_worke
     Returns:
         Tuple of (processed_count, error_count)
     """
-    logger = setup_logging(name="preprocess_jobs")
+    import os
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logger = setup_logging(log_level=log_level, name="preprocess_jobs")
     total_processed = 0
     total_errors = 0
     offset = 0
@@ -196,7 +208,18 @@ def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_worke
         total_processed += len(updates)
         total_errors += errors_in_chunk
 
-        logger.info(f"Chunk complete: {len(updates)} processed, {errors_in_chunk} errors")
+        if errors_in_chunk > 0:
+            logger.warning(
+                "Chunk at offset %d: %d record(s) failed (see _clean_record logs for details)",
+                offset,
+                errors_in_chunk,
+            )
+        logger.info(
+            "Chunk complete at offset %d: %d processed, %d errors",
+            offset,
+            len(updates),
+            errors_in_chunk,
+        )
 
         # Advance offset
         offset += len(records)

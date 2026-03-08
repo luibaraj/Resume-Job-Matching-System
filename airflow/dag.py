@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -5,15 +6,45 @@ from airflow.models import Variable
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
 
-# --- Config from Airflow Variables (set in UI: Admin > Variables) ---
-GREENHOUSE_BOARD_TOKENS = Variable.get("GREENHOUSE_BOARD_TOKENS", default_var="")
-REQUEST_TIMEOUT = Variable.get("REQUEST_TIMEOUT", default_var="30")
-MAX_RETRIES = Variable.get("MAX_RETRIES", default_var="3")
-RETRY_BACKOFF = Variable.get("RETRY_BACKOFF", default_var="2.0")
-LOG_LEVEL = Variable.get("LOG_LEVEL", default_var="INFO")
-DATA_HOST_PATH = Variable.get("DATA_HOST_PATH", default_var="/Users/luisbarajas/Desktop/Projects/Resume-Job-Match/Resume-Job-Matching-System/data")
-COLLECTION_IMAGE = Variable.get("COLLECTION_IMAGE", default_var="job-collection:latest")
-PREPROCESSING_IMAGE = Variable.get("PREPROCESSING_IMAGE", default_var="job-preprocessing:latest")
+
+# --- Helper to load .env file and fallback from Airflow Variables ---
+def _load_dotenv(path):
+    """Load environment variables from .env file into a dict."""
+    env = {}
+    try:
+        with open(os.path.abspath(path)) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, _, val = line.partition("=")
+                env[key.strip()] = val.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return env
+
+
+_ENV_PATH = "/project/.env"
+_dotenv = _load_dotenv(_ENV_PATH)
+
+
+def _get(var_name, default=""):
+    """Get config value from Airflow Variable, fallback to .env file."""
+    airflow_val = Variable.get(var_name, default_var="")
+    if airflow_val:
+        return airflow_val
+    return _dotenv.get(var_name, default)
+
+
+# --- Config from Airflow Variables (set in UI: Admin > Variables) or .env fallback ---
+GREENHOUSE_BOARD_TOKENS = _get("GREENHOUSE_BOARD_TOKENS")
+REQUEST_TIMEOUT = _get("REQUEST_TIMEOUT", "30")
+MAX_RETRIES = _get("MAX_RETRIES", "3")
+RETRY_BACKOFF = _get("RETRY_BACKOFF", "2.0")
+LOG_LEVEL = _get("LOG_LEVEL", "INFO")
+DATA_HOST_PATH = _get("DATA_HOST_PATH", "/Users/luisbarajas/Desktop/Projects/Resume-Job-Match/Resume-Job-Matching-System/data")
+COLLECTION_IMAGE = _get("COLLECTION_IMAGE", "job-collection:latest")
+PREPROCESSING_IMAGE = _get("PREPROCESSING_IMAGE", "job-preprocessing:latest")
 
 shared_data_mount = Mount(
     target="/data",
