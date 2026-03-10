@@ -45,3 +45,6 @@ logs/
 # Bind mount directory — track dir via .gitkeep, ignore contents
 data/*
 !data/.gitkeep
+
+# Scratch
+/Scratch

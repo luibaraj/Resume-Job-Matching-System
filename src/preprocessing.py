@@ -39,14 +39,34 @@ STATE_ABBREVIATIONS: dict[str, str] = {
     "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC",
 }
 
+# US state abbreviations for quick lookup
+US_STATE_ABBREVS: frozenset[str] = frozenset(STATE_ABBREVIATIONS.values())
+
+# Known US cities (without state) that are unambiguous
+KNOWN_US_CITIES: frozenset[str] = frozenset({
+    "san francisco", "new york city", "chicago", "seattle", "boston", "austin",
+    "los angeles", "mountain view", "palo alto", "menlo park", "cupertino",
+    "san jose", "hawthorne", "redmond", "starbase",
+})
+
+# International country and city keywords
+INTERNATIONAL_KEYWORDS: frozenset[str] = frozenset({
+    "india", "uk", "united kingdom", "england", "ireland", "japan", "canada",
+    "australia", "singapore", "germany", "france", "netherlands", "spain",
+    "brazil", "mexico", "israel", "south korea", "china", "poland", "hungary",
+    "bulgaria", "philippines", "ind", "nz", "jpn", "ie",
+})
+
 
 def decode_html_entities(text: str) -> str:
     """Decode HTML entities to their Unicode equivalents.
 
-    Uses html.unescape() from the standard library.
+    Applies html.unescape() repeatedly until the string no longer changes,
+    handling double-encoded input like &amp;nbsp; → &nbsp; → \xa0.
 
     Examples:
         "&amp;" -> "&"
+        "&amp;nbsp;" -> "\xa0"
         "&lt;" -> "<"
         "&gt;" -> ">"
         "&#39;" -> "'"
@@ -58,7 +78,12 @@ def decode_html_entities(text: str) -> str:
     Returns:
         String with HTML entities decoded
     """
-    return html.unescape(text)
+    for _ in range(5):
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
 
 
 def normalize_list_items(text: str) -> str:
@@ -167,6 +192,63 @@ def normalize_location(location: str | None) -> str | None:
         return None
 
     return cleaned
+
+
+def classify_location_is_us(location: str | None) -> int | None:
+    """Classify a job location as US (1), non-US (0), or unknown (None).
+
+    Returns:
+        1 for US jobs
+        0 for non-US jobs
+        None for unknown/Remote/ambiguous locations
+
+    Classification logic (order matters):
+    - None or "Remote" → None
+    - Contains US state abbreviation (e.g., ", CA", ", TX") → 1
+    - Contains US state full name → 1
+    - Contains "United States", "USA", "DC" → 1
+    - Contains international keyword → 0 (check before US cities to avoid false matches)
+    - Contains known unambiguous US city name → 1
+    - Otherwise → None (don't guess)
+    """
+    if not location:
+        return None
+
+    if location == "Remote":
+        return None
+
+    # Normalize for comparison
+    loc_lower = location.lower()
+
+    # Check for US state abbreviations (e.g., ", CA") — must have comma prefix and word boundary
+    for abbrev in US_STATE_ABBREVS:
+        # Match ", CA" or ", NY" with word boundary to avoid ", IN" matching in ", INDIA"
+        pattern = rf', {re.escape(abbrev.lower())}\b'
+        if re.search(pattern, loc_lower):
+            return 1
+
+    # Check for explicit "United States" / "USA" mentions
+    if any(kw in loc_lower for kw in ["united states", "usa", ", dc", "washington, dc"]):
+        return 1
+
+    # Check for international keywords early (word boundary) to avoid state names like "indiana" matching in "india"
+    for keyword in INTERNATIONAL_KEYWORDS:
+        if re.search(rf'\b{re.escape(keyword)}\b', loc_lower):
+            return 0
+
+    # Check for US state full names (with word boundary)
+    for state_name in STATE_ABBREVIATIONS.keys():
+        # Use word boundary to match whole words only
+        if re.search(rf'\b{re.escape(state_name)}\b', loc_lower):
+            return 1
+
+    # Check for known unambiguous US cities (with word boundary)
+    for city in KNOWN_US_CITIES:
+        if re.search(rf'\b{re.escape(city)}\b', loc_lower):
+            return 1
+
+    # Default: unknown/ambiguous (don't classify as US or non-US)
+    return None
 
 
 def clean_title(title: str) -> str:
@@ -321,7 +403,7 @@ def preprocess_jobs(db: DatabaseManager, run_id: int, chunk_size: int, num_worke
 
         # Apply location and title cleaning, then construct full updates
         full_updates = [
-            (job_id, cleaned_desc, normalize_location(id_to_meta[job_id][0]), clean_title(id_to_meta[job_id][1]))
+            (job_id, cleaned_desc, normalize_location(id_to_meta[job_id][0]), clean_title(id_to_meta[job_id][1]), classify_location_is_us(id_to_meta[job_id][0]))
             for job_id, cleaned_desc in updates
         ]
 

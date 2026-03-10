@@ -5,6 +5,7 @@ from src.preprocessing import (
     _clean_record,
     clean_job_description,
     clean_title,
+    classify_location_is_us,
     decode_html_entities,
     normalize_list_items,
     normalize_location,
@@ -31,9 +32,9 @@ class TestDecodeHtmlEntities:
         assert decode_html_entities("&#39;") == "'"
 
     def test_double_encoded(self):
-        # html.unescape only does one pass, so &amp;lt; becomes &lt; (not <)
+        # Multi-pass decoding: &amp;lt; → &lt; → <
         result = decode_html_entities("&amp;lt;")
-        assert result == "&lt;"
+        assert result == "<"
 
     def test_plain_text_unchanged(self):
         assert decode_html_entities("hello world") == "hello world"
@@ -41,6 +42,17 @@ class TestDecodeHtmlEntities:
     def test_mixed_entities(self):
         result = decode_html_entities("Design &amp; implement &lt;APIs&gt;")
         assert result == "Design & implement <APIs>"
+
+    def test_double_encoded_nbsp(self):
+        assert decode_html_entities("&amp;nbsp;") == "\xa0"
+
+    def test_triple_encoded(self):
+        # Handles pathological triple encoding
+        assert decode_html_entities("&amp;amp;") == "&"
+
+    def test_idempotent_plain_text(self):
+        # Plain text with ampersand is not corrupted
+        assert decode_html_entities("A & B") == "A & B"
 
 
 class TestNormalizeListItems:
@@ -830,3 +842,80 @@ class TestPreprocessJobsFieldCleaning:
             cursor = conn.execute("SELECT location FROM jobs WHERE id = 1")
             row = cursor.fetchone()
             assert row["location"] is None
+
+
+class TestClassifyLocationIsUs:
+    """Tests for classify_location_is_us() function."""
+
+    def test_none_location(self):
+        """None location returns None."""
+        assert classify_location_is_us(None) is None
+
+    def test_empty_string(self):
+        """Empty string returns None."""
+        assert classify_location_is_us("") is None
+
+    def test_remote(self):
+        """'Remote' returns None."""
+        assert classify_location_is_us("Remote") is None
+
+    def test_us_city_with_state_abbrev(self):
+        """US city with state abbreviation returns 1."""
+        assert classify_location_is_us("San Francisco, CA") == 1
+        assert classify_location_is_us("New York, NY") == 1
+        assert classify_location_is_us("Austin, TX") == 1
+
+    def test_us_city_with_state_full_name(self):
+        """US city with full state name returns 1."""
+        assert classify_location_is_us("Mountain View, California (HQ)") == 1
+        assert classify_location_is_us("San Jose, California") == 1
+        assert classify_location_is_us("Denver, Colorado") == 1
+
+    def test_known_us_city_only(self):
+        """Known unambiguous US city without state returns 1."""
+        assert classify_location_is_us("San Francisco") == 1
+        assert classify_location_is_us("Mountain View") == 1
+        assert classify_location_is_us("Hawthorne") == 1
+        assert classify_location_is_us("Redmond") == 1
+        assert classify_location_is_us("Starbase") == 1
+
+    def test_us_dc(self):
+        """Washington, DC and DC-related strings return 1."""
+        assert classify_location_is_us("Washington, DC") == 1
+        assert classify_location_is_us(", DC") == 1
+
+    def test_explicit_usa(self):
+        """'United States' and 'USA' variants return 1."""
+        assert classify_location_is_us("United States") == 1
+        assert classify_location_is_us("USA") == 1
+
+    def test_international_country_names(self):
+        """International country keywords return 0."""
+        assert classify_location_is_us("London, England") == 0
+        assert classify_location_is_us("London, United Kingdom") == 0
+        assert classify_location_is_us("Bangalore, India") == 0
+        assert classify_location_is_us("Bangalore, IND") == 0
+        assert classify_location_is_us("Auckland, NZ") == 0
+        assert classify_location_is_us("Tokyo, Japan") == 0
+        assert classify_location_is_us("Dublin, Ireland") == 0
+        assert classify_location_is_us("Dublin, IE") == 0
+
+    def test_ambiguous_city_only(self):
+        """City-only names (ambiguous between US and non-US) return None."""
+        assert classify_location_is_us("Dublin") is None
+        assert classify_location_is_us("London") is None
+        assert classify_location_is_us("Warsaw") is None
+        assert classify_location_is_us("Toronto") is None
+
+    def test_non_standard_locations(self):
+        """Non-standard work location descriptors return None."""
+        assert classify_location_is_us("In-Office") is None
+        assert classify_location_is_us("Distributed") is None
+        assert classify_location_is_us("Warsaw; Hybrid") is None
+        assert classify_location_is_us("BLANK,BLANK,Multiple Locations") is None
+
+    def test_case_insensitive(self):
+        """Matching is case-insensitive."""
+        assert classify_location_is_us("SAN FRANCISCO, CA") == 1
+        assert classify_location_is_us("london, england") == 0
+        assert classify_location_is_us("REMOTE") is None

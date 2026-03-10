@@ -41,6 +41,7 @@ class DatabaseManager:
                     absolute_url        TEXT,
                     updated_at_source   TEXT,
                     collected_at        TEXT    NOT NULL,
+                    is_us               INTEGER,
                     preprocessed        INTEGER NOT NULL DEFAULT 0,
                     extracted           INTEGER NOT NULL DEFAULT 0,
                     embedded            INTEGER NOT NULL DEFAULT 0,
@@ -64,6 +65,12 @@ class DatabaseManager:
                 );
                 """
             )
+            # Add is_us column for existing databases
+            try:
+                with self.get_connection() as conn:
+                    conn.execute("ALTER TABLE jobs ADD COLUMN is_us INTEGER")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -252,24 +259,24 @@ class DatabaseManager:
                 rows,
             )
 
-    def update_job_fields_batch(self, updates: list[tuple[int, str, str | None, str]]) -> None:
-        """Update cleaned_description, location, title, and set preprocessed=1 in one transaction.
+    def update_job_fields_batch(self, updates: list[tuple[int, str, str | None, str, int | None]]) -> None:
+        """Update cleaned_description, location, title, is_us, and set preprocessed=1 in one transaction.
 
         Args:
-            updates: List of (job_id, cleaned_description, cleaned_location, cleaned_title) tuples
+            updates: List of (job_id, cleaned_description, cleaned_location, cleaned_title, is_us) tuples
         """
         if not updates:
             return
 
         rows = [
-            (cleaned_desc, cleaned_loc, cleaned_title, job_id)
-            for job_id, cleaned_desc, cleaned_loc, cleaned_title in updates
+            (cleaned_desc, cleaned_loc, cleaned_title, is_us, job_id)
+            for job_id, cleaned_desc, cleaned_loc, cleaned_title, is_us in updates
         ]
         with self.get_connection() as conn:
             conn.executemany(
                 """
                 UPDATE jobs
-                SET cleaned_description = ?, location = ?, title = ?, preprocessed = 1
+                SET cleaned_description = ?, location = ?, title = ?, is_us = ?, preprocessed = 1
                 WHERE id = ?
                 """,
                 rows,

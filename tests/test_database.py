@@ -835,10 +835,10 @@ class TestUpdateJobFieldsBatch:
             cursor = conn.execute("SELECT id FROM jobs WHERE greenhouse_id IN (7000, 7001) ORDER BY id")
             job_ids = [row["id"] for row in cursor.fetchall()]
 
-        # Batch update with new values
+        # Batch update with new values (job_id, cleaned_desc, location, title, is_us)
         updates = [
-            (job_ids[0], "cleaned_0", "Remote", "Senior Engineer"),
-            (job_ids[1], "cleaned_1", "San Francisco, CA", "Junior Dev"),
+            (job_ids[0], "cleaned_0", "Remote", "Senior Engineer", None),
+            (job_ids[1], "cleaned_1", "San Francisco, CA", "Junior Dev", 1),
         ]
         db_manager.update_job_fields_batch(updates)
 
@@ -872,7 +872,7 @@ class TestUpdateJobFieldsBatch:
             cursor = conn.execute("SELECT id FROM jobs")
             job_id = cursor.fetchone()["id"]
 
-        updates = [(job_id, "cleaned", None, "New Title")]
+        updates = [(job_id, "cleaned", None, "New Title", None)]
         db_manager.update_job_fields_batch(updates)
 
         with db_manager.get_connection() as conn:
@@ -891,7 +891,7 @@ class TestUpdateJobFieldsBatch:
             cursor = conn.execute("SELECT id FROM jobs WHERE greenhouse_id = 8000")
             job_id = cursor.fetchone()["id"]
 
-        updates = [(job_id, "cleaned", "NY, NY", "Engineer")]
+        updates = [(job_id, "cleaned", "NY, NY", "Engineer", 1)]
         db_manager.update_job_fields_batch(updates)
 
         with db_manager.get_connection() as conn:
