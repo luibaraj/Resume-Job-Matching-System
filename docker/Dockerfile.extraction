@@ -4,20 +4,14 @@ RUN useradd -m -u 1000 pipeline
 
 WORKDIR /app
 
-# llama-cpp-python requires cmake + C compiler to build from source
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
 # GPU_BACKEND build arg: set to "cuda" or "metal" to enable GPU acceleration.
-# cmake args are passed before pip install so llama-cpp-python picks them up.
 ARG GPU_BACKEND=cpu
 RUN if [ "$GPU_BACKEND" = "cuda" ]; then \
-        CMAKE_ARGS="-DLLAMA_CUDA=on" pip install --no-cache-dir llama-cpp-python; \
+        pip install --no-cache-dir llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 --only-binary :all:; \
     elif [ "$GPU_BACKEND" = "metal" ]; then \
-        CMAKE_ARGS="-DLLAMA_METAL=on" pip install --no-cache-dir llama-cpp-python; \
+        pip install --no-cache-dir llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal --only-binary :all:; \
     else \
-        pip install --no-cache-dir llama-cpp-python; \
+        pip install --no-cache-dir llama-cpp-python --only-binary :all:; \
     fi
 
 RUN pip install --no-cache-dir jsonschema
