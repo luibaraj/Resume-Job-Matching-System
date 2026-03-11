@@ -50,6 +50,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.collection
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-collection:latest
           push: true
 
@@ -58,6 +59,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.preprocessing
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-preprocessing:latest
           push: true
 
@@ -66,6 +68,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.extraction
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-extraction:latest
           push: true
 
@@ -74,5 +77,6 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.airflow
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/airflow:latest
           push: true
