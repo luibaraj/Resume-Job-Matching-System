@@ -1,6 +1,6 @@
 services:
   airflow:
-    image: apache/airflow:2.9.3-python3.11
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/resume-job-matching-system/airflow:latest
     container_name: airflow
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
