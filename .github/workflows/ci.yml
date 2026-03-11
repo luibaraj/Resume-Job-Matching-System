@@ -50,7 +50,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.collection
-          tags: ghcr.io/${{ github.repository }}/job-collection:latest
+          tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-collection:latest
           push: true
 
       - name: Build and push job-preprocessing
@@ -58,7 +58,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.preprocessing
-          tags: ghcr.io/${{ github.repository }}/job-preprocessing:latest
+          tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-preprocessing:latest
           push: true
 
       - name: Build and push job-extraction
@@ -66,5 +66,5 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.extraction
-          tags: ghcr.io/${{ github.repository }}/job-extraction:latest
+          tags: ghcr.io/${{ github.repository_owner }}/resume-job-matching-system/job-extraction:latest
           push: true
