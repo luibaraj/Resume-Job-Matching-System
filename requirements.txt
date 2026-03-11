@@ -7,6 +7,12 @@ pytest==8.3.2
 pytest-cov==5.0.0
 pytest-mock==3.14.0
 pyyaml==6.0.2
+jsonschema==4.21.1
+
+# Airflow (for DAG tests)
+apache-airflow>=2.9.3
+apache-airflow-providers-docker>=3.8.0
+docker>=6.1.0
 
 # Code quality (optional, for CI)
 ruff==0.4.10
