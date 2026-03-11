@@ -52,6 +52,21 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_jobs_preprocessed ON jobs(preprocessed);
                 CREATE INDEX IF NOT EXISTS idx_jobs_greenhouse_id ON jobs(greenhouse_id);
 
+                CREATE TABLE IF NOT EXISTS job_extractions (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id                  INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    job_title               TEXT,
+                    responsibilities        TEXT,
+                    skills                  TEXT,
+                    tools_and_platforms     TEXT,
+                    education               TEXT,
+                    experience_min_years    INTEGER,
+                    experience_is_inferred  INTEGER,
+                    extracted_at            TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_extractions_job_id ON job_extractions(job_id);
+
                 CREATE TABLE IF NOT EXISTS pipeline_runs (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_date        TEXT    NOT NULL,
@@ -280,6 +295,68 @@ class DatabaseManager:
                 WHERE id = ?
                 """,
                 rows,
+            )
+
+    def get_unextracted_jobs_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str | None, str]]:
+        """Fetch a chunk of preprocessed but unextracted jobs.
+
+        Returns plain tuples instead of sqlite3.Row objects for compatibility with
+        multiprocessing (rows are not picklable).
+
+        Args:
+            chunk_size: Number of records to fetch
+            offset: Number of records to skip
+
+        Returns:
+            List of (id, cleaned_description, title) tuples
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, cleaned_description, title FROM jobs WHERE preprocessed=1 AND extracted=0 ORDER BY id LIMIT ? OFFSET ?",
+                (chunk_size, offset),
+            )
+            return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
+
+    def update_extraction_batch(self, updates: list[tuple[int, dict]]) -> None:
+        """Write extraction results to job_extractions and set extracted=1 on jobs.
+
+        Args:
+            updates: List of (job_id, extracted_dict) tuples where extracted_dict
+                     matches EXTRACTION_JSON_SCHEMA structure.
+        """
+        import json
+
+        if not updates:
+            return
+
+        extraction_rows = [
+            (
+                job_id,
+                data.get("job_title"),
+                json.dumps(data.get("responsibilities", [])),
+                json.dumps(data.get("skills", [])),
+                json.dumps(data.get("tools_and_platforms", [])),
+                data.get("education"),
+                data.get("experience", {}).get("min_years"),
+                int(data.get("experience", {}).get("is_inferred", False)),
+            )
+            for job_id, data in updates
+        ]
+        job_ids = [job_id for job_id, _ in updates]
+
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO job_extractions
+                    (job_id, job_title, responsibilities, skills, tools_and_platforms,
+                     education, experience_min_years, experience_is_inferred)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                extraction_rows,
+            )
+            conn.executemany(
+                "UPDATE jobs SET extracted=1 WHERE id=?",
+                [(job_id,) for job_id in job_ids],
             )
 
     def create_pipeline_run(self, run_date: str, step: str) -> int:

@@ -45,12 +45,22 @@ LOG_LEVEL = _get("LOG_LEVEL", "INFO")
 DATA_HOST_PATH = _get("DATA_HOST_PATH", "/Users/luisbarajas/Desktop/Projects/Resume-Job-Match/Resume-Job-Matching-System/data")
 COLLECTION_IMAGE = _get("COLLECTION_IMAGE", "job-collection:latest")
 PREPROCESSING_IMAGE = _get("PREPROCESSING_IMAGE", "job-preprocessing:latest")
+EXTRACTION_IMAGE = _get("EXTRACTION_IMAGE", "job-extraction:latest")
+EXTRACTION_MODEL_PATH = _get("EXTRACTION_MODEL_PATH", "/models/llama-3.2-3b.gguf")
+MODEL_HOST_PATH = _get("MODEL_HOST_PATH", "")
 
 shared_data_mount = Mount(
     target="/data",
     source=DATA_HOST_PATH,
     type="bind",
 )
+
+model_mount = Mount(
+    target=EXTRACTION_MODEL_PATH,
+    source=MODEL_HOST_PATH,
+    type="bind",
+    read_only=True,
+) if MODEL_HOST_PATH else None
 
 default_args = {
     "owner": "pipeline",
@@ -106,4 +116,21 @@ with DAG(
         do_xcom_push=False,
     )
 
-    collect_jobs >> preprocess_jobs
+    extract_jobs_task = DockerOperator(
+        task_id="extract_jobs",
+        image=EXTRACTION_IMAGE,
+        environment={
+            "DB_PATH": "/data/jobs.db",
+            "EXTRACTION_MODEL_PATH": EXTRACTION_MODEL_PATH,
+            "LOG_LEVEL": LOG_LEVEL,
+        },
+        mounts=[shared_data_mount] + ([model_mount] if model_mount else []),
+        mount_tmp_dir=False,
+        network_mode="bridge",
+        auto_remove="success",
+        docker_url="unix://var/run/docker.sock",
+        retrieve_output=False,
+        do_xcom_push=False,
+    )
+
+    collect_jobs >> preprocess_jobs >> extract_jobs_task

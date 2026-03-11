@@ -44,6 +44,23 @@ class Config:
         default_factory=lambda: int(os.environ.get("PREPROCESSING_MAX_RETRIES", "2"))
     )
 
+    # Extraction
+    extraction_model_path: str = field(
+        default_factory=lambda: os.environ.get("EXTRACTION_MODEL_PATH", "")
+    )
+    extraction_chunk_size: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_CHUNK_SIZE", "50"))
+    )
+    extraction_max_retries: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_MAX_RETRIES", "2"))
+    )
+    extraction_n_ctx: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_N_CTX", "2048"))
+    )
+    extraction_n_gpu_layers: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_N_GPU_LAYERS", "-1"))
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
@@ -63,4 +80,8 @@ def load_config() -> Config:
         raise ValueError("PREPROCESSING_CHUNK_SIZE must be >= 1")
     if config.preprocessing_max_retries < 0:
         raise ValueError("PREPROCESSING_MAX_RETRIES must be >= 0")
+    if config.extraction_chunk_size < 1:
+        raise ValueError("EXTRACTION_CHUNK_SIZE must be >= 1")
+    if config.extraction_max_retries < 0:
+        raise ValueError("EXTRACTION_MAX_RETRIES must be >= 0")
     return config

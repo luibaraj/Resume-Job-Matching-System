@@ -35,6 +35,26 @@ services:
       - collection
     restart: "no"
 
+  extraction:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.extraction
+    container_name: job-extraction
+    environment:
+      - DB_PATH=/data/jobs.db
+      - EXTRACTION_MODEL_PATH=${EXTRACTION_MODEL_PATH}
+      - EXTRACTION_CHUNK_SIZE=${EXTRACTION_CHUNK_SIZE:-50}
+      - EXTRACTION_N_GPU_LAYERS=${EXTRACTION_N_GPU_LAYERS:--1}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../data:/data
+      - ${MODEL_HOST_PATH}:${EXTRACTION_MODEL_PATH}:ro
+    networks:
+      - job-pipeline
+    depends_on:
+      - preprocessing
+    restart: "no"
+
 networks:
   job-pipeline:
     driver: bridge

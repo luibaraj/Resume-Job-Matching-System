@@ -65,9 +65,13 @@ class TestDagStructure:
         """preprocess_jobs task exists."""
         assert "preprocess_jobs" in loaded_dag.task_ids
 
-    def test_task_count_is_two(self, loaded_dag):
-        """DAG has exactly 2 tasks."""
-        assert len(loaded_dag.tasks) == 2
+    def test_task_count_is_three(self, loaded_dag):
+        """DAG has exactly 3 tasks."""
+        assert len(loaded_dag.tasks) == 3
+
+    def test_has_extract_jobs_task(self, loaded_dag):
+        """extract_jobs task exists."""
+        assert "extract_jobs" in loaded_dag.task_ids
 
 
 class TestDagTaskTypes:
@@ -97,10 +101,15 @@ class TestDagTaskDependency:
         collect_task = loaded_dag.get_task("collect_jobs")
         assert len(collect_task.upstream_task_ids) == 0
 
-    def test_preprocess_has_no_downstream(self, loaded_dag):
-        """preprocess_jobs has no downstream tasks."""
+    def test_preprocess_downstream_is_extract(self, loaded_dag):
+        """preprocess_jobs is upstream of extract_jobs."""
         preprocess_task = loaded_dag.get_task("preprocess_jobs")
-        assert len(preprocess_task.downstream_task_ids) == 0
+        assert "extract_jobs" in preprocess_task.downstream_task_ids
+
+    def test_extract_has_no_downstream(self, loaded_dag):
+        """extract_jobs has no downstream tasks."""
+        extract_task = loaded_dag.get_task("extract_jobs")
+        assert len(extract_task.downstream_task_ids) == 0
 
 
 class TestDagDefaultArgs:
