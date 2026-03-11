@@ -5,6 +5,7 @@ Requires apache-airflow to be installed. Tests are automatically skipped if not 
 
 import importlib.util
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,8 +25,9 @@ def loaded_dag():
     """
     with patch("airflow.models.Variable.get", return_value=""):
         # Load the DAG module using importlib
+        dag_path = Path(__file__).parent.parent / "airflow" / "dag.py"
         spec = importlib.util.spec_from_file_location(
-            "airflow_dag", "/Users/luisbarajas/Desktop/Projects/Resume-Job-Match/Resume-Job-Matching-System/airflow/dag.py"
+            "airflow_dag", dag_path
         )
         dag_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(dag_module)
