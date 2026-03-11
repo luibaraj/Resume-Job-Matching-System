@@ -11,7 +11,7 @@ RUN if [ "$GPU_BACKEND" = "cuda" ]; then \
     elif [ "$GPU_BACKEND" = "metal" ]; then \
         pip install --no-cache-dir llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal --only-binary :all:; \
     else \
-        pip install --no-cache-dir llama-cpp-python --only-binary :all:; \
+        pip install --no-cache-dir llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu --only-binary :all:; \
     fi
 
 RUN pip install --no-cache-dir jsonschema
