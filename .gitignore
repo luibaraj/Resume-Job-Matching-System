@@ -46,5 +46,9 @@ logs/
 data/*
 !data/.gitkeep
 
+# Models — track dir via .gitkeep, ignore downloaded model files
+models/*
+!models/.gitkeep
+
 # Scratch
 /Scratch
