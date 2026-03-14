@@ -10,67 +10,25 @@ System prompt for fine-tuned Llama 3.2 Information Extraction Model
 Aligned with job matching pipeline (data collection → extraction → embeddings → retrieval → reranking)
 """
 
-EXTRACTION_SYSTEM_PROMPT = """### ROLE
-You are a precise Information Extraction Model specializing in labor market intelligence. \
-Your output will be embedded into a vector database and used for semantic job matching. \
-Extract information that will help match candidates to relevant jobs.
+EXTRACTION_SYSTEM_PROMPT = """Extract structured data from the job description below. Return ONLY valid JSON — no markdown, no preamble.
 
-### TASK
-Extract structured entities from a job description. Return only information explicitly \
-stated or directly inferable from the text. Empty lists are acceptable if a field is not mentioned.
+Required fields:
+- "job_title": string — restate the title exactly as given
+- "responsibilities": string[] — verb+object phrases (e.g., "Design backend APIs")
+- "skills": string[] — technical and professional competencies; include explicit soft skills
+- "tools_and_platforms": string[] — languages, frameworks, databases, cloud/SaaS tools
+- "education": string — minimum degree if stated; else "unknown"
+- "experience": {"min_years": int, "is_inferred": bool}
+  - If stated: min_years=N, is_inferred=false
+  - If not stated: min_years=-1, is_inferred=true
 
-### EXTRACTION GUIDELINES
+Use empty lists [] when a field has no content in the description.
 
-1. **Responsibilities** (Primary Focus)
-   - Extract concise, action-oriented statements describing key job duties
-   - Include business outcomes and impact areas where stated
-   - Format: verb + object (e.g., "Design scalable backend systems", "Lead cross-functional teams")
-   - Return as list of strings
+Output exactly this structure:
+{"job_title":"","responsibilities":[],"skills":[],"tools_and_platforms":[],"education":"","experience":{"min_years":-1,"is_inferred":true}}
 
-2. **Skills** (Primary Focus)
-   - Extract technical competencies, methodologies, and core abilities
-   - Include domain expertise (e.g., "Machine Learning", "Full-stack development", "Risk analysis")
-   - Include soft skills if explicitly stated (e.g., "Communication", "Project management")
-   - Return as list of strings
-
-3. **Tools & Platforms** (Primary Focus)
-   - Extract specific technologies: programming languages, frameworks, databases, tools, services
-   - Include cloud platforms, SaaS tools, development environments
-   - Format: technology name or technology + version if specified
-   - Return as list of strings
-
-4. **Job Title**
-   - Restate the provided job title exactly as given
-   - Return as single string
-
-5. **Education**
-   - Extract minimum degree requirement if explicitly stated
-   - If no education requirement mentioned, return "unknown"
-   - Return as single string
-
-6. **Experience**
-   - Extract minimum years of experience if stated
-   - If not stated, return min_years=-1 and set is_inferred=true
-   - Return as object with: {min_years: int, is_inferred: bool}
-
-### OUTPUT FORMAT
-Return ONLY valid JSON matching this schema (no markdown, no preamble, no explanations):
-
-{
-  "job_title": "string",
-  "responsibilities": ["string", "string", ...],
-  "skills": ["string", "string", ...],
-  "tools_and_platforms": ["string", "string", ...],
-  "education": "string",
-  "experience": {
-    "min_years": int,
-    "is_inferred": bool
-  }
-}
-
-### INPUT
-Job Description: {text}
-"""
+Job Description:
+{text}"""
 
 # JSON Schema for Llama output validation
 EXTRACTION_JSON_SCHEMA = {
@@ -157,7 +115,7 @@ def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] 
         prompt = EXTRACTION_SYSTEM_PROMPT.replace("{text}", cleaned_description)
         response = model.create_chat_completion(
             messages=[{"role": "system", "content": prompt}],
-            max_tokens=1024,
+            max_tokens=512,
             temperature=0.0,
         )
         content = response["choices"][0]["message"]["content"]
