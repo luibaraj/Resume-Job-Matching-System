@@ -209,6 +209,11 @@ class TestExtractJob:
         job_id, data = result
         assert job_id == 42
         assert data["job_title"] == "Software Engineer"
+        call_kwargs = model.create_chat_completion.call_args[1]
+        assert len(call_kwargs["messages"]) == 2
+        assert call_kwargs["messages"][0]["role"] == "system"
+        assert call_kwargs["messages"][1]["role"] == "user"
+        assert call_kwargs["response_format"] == {"type": "json_object"}
 
     def test_invalid_json_returns_none(self):
         model = MagicMock()

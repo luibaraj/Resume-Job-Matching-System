@@ -217,12 +217,12 @@ class TestDockerComposeAirflow:
         assert "airflow" in content["services"]
 
     def test_uses_apache_airflow_image(self):
-        """airflow service uses apache/airflow image."""
+        """airflow service uses custom airflow image from GHCR."""
         compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
         content = yaml.safe_load(compose_file.read_text())
         airflow = content["services"]["airflow"]
         image = airflow.get("image", "")
-        assert image.startswith("apache/airflow:")
+        assert image.startswith("ghcr.io/") and "airflow" in image
 
     def test_docker_sock_volume_mounted(self):
         """Docker socket is mounted for DinD."""

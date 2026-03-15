@@ -10,25 +10,27 @@ System prompt for fine-tuned Llama 3.2 Information Extraction Model
 Aligned with job matching pipeline (data collection → extraction → embeddings → retrieval → reranking)
 """
 
-EXTRACTION_SYSTEM_PROMPT = """Extract structured data from the job description below. Return ONLY valid JSON — no markdown, no preamble.
+EXTRACTION_SYSTEM_PROMPT = """\
+Extract structured data from the job description below. Fill in the JSON skeleton provided — replace placeholder values with the correct extracted values.
 
-Required fields:
-- "job_title": string — restate the title exactly as given
-- "responsibilities": string[] — verb+object phrases (e.g., "Design backend APIs")
-- "skills": string[] — technical and professional competencies; include explicit soft skills
-- "tools_and_platforms": string[] — languages, frameworks, databases, cloud/SaaS tools
-- "education": string — minimum degree if stated; else "unknown"
-- "experience": {"min_years": int, "is_inferred": bool}
+Field rules:
+- "job_title": restate the title exactly as given
+- "responsibilities": verb+object phrases (e.g., "Design backend APIs")
+- "skills": technical and professional competencies; include explicit soft skills
+- "tools_and_platforms": languages, frameworks, databases, cloud/SaaS tools
+- "education": minimum degree if stated; else "unknown"
+- "experience":
   - If stated: min_years=N, is_inferred=false
   - If not stated: min_years=-1, is_inferred=true
 
-Use empty lists [] when a field has no content in the description.
+Use empty lists [] when a field has no content. Return ONLY valid JSON — no markdown, no preamble."""
 
-Output exactly this structure:
-{"job_title":"","responsibilities":[],"skills":[],"tools_and_platforms":[],"education":"","experience":{"min_years":-1,"is_inferred":true}}
-
+SKELETON_TEMPLATE = """\
 Job Description:
-{text}"""
+{text}
+
+Fill this skeleton:
+{{"job_title":"","responsibilities":[],"skills":[],"tools_and_platforms":[],"education":"","experience":{{"min_years":-1,"is_inferred":true}}}}"""
 
 # JSON Schema for Llama output validation
 EXTRACTION_JSON_SCHEMA = {
@@ -112,9 +114,13 @@ def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] 
         return None
 
     try:
-        prompt = EXTRACTION_SYSTEM_PROMPT.replace("{text}", cleaned_description)
+        user_message = SKELETON_TEMPLATE.replace("{text}", cleaned_description)
         response = model.create_chat_completion(
-            messages=[{"role": "system", "content": prompt}],
+            messages=[
+                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={"type": "json_object"},
             max_tokens=512,
             temperature=0.0,
         )
