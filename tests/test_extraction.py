@@ -1,4 +1,6 @@
 import json
+import queue
+import threading
 from unittest.mock import MagicMock, patch
 
 import jsonschema
@@ -7,6 +9,7 @@ import pytest
 from src.database import DatabaseManager
 from src.extraction import (
     EXTRACTION_JSON_SCHEMA,
+    _db_writer_thread,
     extract_job,
     extract_jobs,
 )
@@ -314,3 +317,44 @@ class TestExtractJobsLoop:
         with db_manager.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM jobs WHERE extracted=1").fetchone()[0]
         assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# _db_writer_thread
+# ---------------------------------------------------------------------------
+
+
+class TestDbWriterThread:
+    def test_processes_batch_and_exits_on_sentinel(self, db_manager):
+        job_id = _insert_preprocessed_job(db_manager, job_id_override=9001)
+        q = queue.Queue()
+        error_event = threading.Event()
+        q.put([(job_id, VALID_EXTRACTION)])
+        q.put(None)
+
+        t = threading.Thread(target=_db_writer_thread, args=(db_manager, q, error_event))
+        t.start()
+        t.join(timeout=5)
+
+        assert not t.is_alive()
+        assert not error_event.is_set()
+        with db_manager.get_connection() as conn:
+            row = conn.execute("SELECT extracted FROM jobs WHERE id=?", (job_id,)).fetchone()
+        assert row["extracted"] == 1
+
+    def test_sets_error_event_on_db_exception(self, db_manager):
+        q = queue.Queue()
+        error_event = threading.Event()
+
+        bad_db = MagicMock()
+        bad_db.update_extraction_batch.side_effect = Exception("DB exploded")
+
+        q.put([(999, VALID_EXTRACTION)])
+        q.put(None)
+
+        t = threading.Thread(target=_db_writer_thread, args=(bad_db, q, error_event))
+        t.start()
+        t.join(timeout=5)
+
+        assert not t.is_alive()
+        assert error_event.is_set()

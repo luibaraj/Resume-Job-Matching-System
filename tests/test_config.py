@@ -17,6 +17,8 @@ class TestLoadConfig:
         monkeypatch.delenv("MAX_RETRIES", raising=False)
         monkeypatch.delenv("RETRY_BACKOFF", raising=False)
         monkeypatch.delenv("LOG_LEVEL", raising=False)
+        monkeypatch.delenv("EXTRACTION_N_THREADS", raising=False)
+        monkeypatch.delenv("EXTRACTION_N_BATCH", raising=False)
 
         config = load_config()
 
@@ -171,4 +173,38 @@ class TestPreprocessingConfig:
         """Negative PREPROCESSING_MAX_RETRIES raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "-1")
         with pytest.raises(ValueError, match="PREPROCESSING_MAX_RETRIES must be >= 0"):
+            load_config()
+
+
+class TestExtractionConfig:
+    """Tests for extraction_n_threads and extraction_n_batch config fields."""
+
+    def test_extraction_n_threads_default(self, monkeypatch):
+        monkeypatch.delenv("EXTRACTION_N_THREADS", raising=False)
+        config = load_config()
+        assert config.extraction_n_threads == 8
+
+    def test_extraction_n_batch_default(self, monkeypatch):
+        monkeypatch.delenv("EXTRACTION_N_BATCH", raising=False)
+        config = load_config()
+        assert config.extraction_n_batch == 256
+
+    def test_reads_extraction_n_threads_from_env(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_N_THREADS", "4")
+        config = load_config()
+        assert config.extraction_n_threads == 4
+
+    def test_reads_extraction_n_batch_from_env(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_N_BATCH", "128")
+        config = load_config()
+        assert config.extraction_n_batch == 128
+
+    def test_extraction_n_threads_zero_raises(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_N_THREADS", "0")
+        with pytest.raises(ValueError, match="EXTRACTION_N_THREADS must be >= 1"):
+            load_config()
+
+    def test_extraction_n_batch_zero_raises(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_N_BATCH", "0")
+        with pytest.raises(ValueError, match="EXTRACTION_N_BATCH must be >= 1"):
             load_config()

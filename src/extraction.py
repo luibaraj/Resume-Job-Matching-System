@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import queue
+import threading
 
 from src.utils import setup_logging
 
@@ -78,20 +80,63 @@ EXTRACTION_JSON_SCHEMA = {
 }
 
 
-def load_model(model_path: str, n_ctx: int, n_gpu_layers: int):
+def load_model(model_path: str, n_ctx: int, n_gpu_layers: int,
+               n_threads: int = 8, n_batch: int = 256):
     """Load the Llama model from a GGUF file.
 
     Args:
         model_path: Path to the GGUF model file
         n_ctx: Context window size
         n_gpu_layers: Number of layers to offload to GPU (-1 = all)
+        n_threads: Number of CPU threads for inference
+        n_batch: Max tokens per prefill batch (affects peak RAM during prompt eval)
 
     Returns:
         Llama model instance
     """
     from llama_cpp import Llama
 
-    return Llama(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, verbose=False)
+    return Llama(
+        model_path=model_path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        n_batch=n_batch,
+        n_threads=n_threads,
+        use_mlock=True,
+        verbose=False,
+    )
+
+
+def _db_writer_thread(db, write_queue: queue.Queue,
+                      writer_error: threading.Event) -> None:
+    """Background thread that drains write_queue and flushes batches to DB.
+
+    Runs until it receives the sentinel value None.
+    Sets writer_error on any DB exception and drains remaining items so
+    the main thread's writer.join() never deadlocks.
+    """
+    while True:
+        item = write_queue.get()
+        if item is None:
+            write_queue.task_done()
+            break
+        try:
+            db.update_extraction_batch(item)
+        except Exception as e:
+            writer_error.set()
+            logging.getLogger("db_writer").error("DB write failed: %s", e, exc_info=True)
+            write_queue.task_done()
+            while True:
+                try:
+                    leftover = write_queue.get_nowait()
+                    write_queue.task_done()
+                    if leftover is None:
+                        break
+                except queue.Empty:
+                    break
+            return
+        else:
+            write_queue.task_done()
 
 
 def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] | None:
@@ -147,6 +192,8 @@ def extract_jobs(
     n_ctx: int,
     n_gpu_layers: int,
     max_retries: int = 2,
+    n_threads: int = 8,
+    n_batch: int = 256,
 ) -> tuple[int, int]:
     """Run extraction over all preprocessed, unextracted jobs in chunked batches.
 
@@ -168,11 +215,21 @@ def extract_jobs(
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     logger = setup_logging(log_level=log_level, name="extract_jobs")
 
-    model = load_model(model_path, n_ctx, n_gpu_layers)
+    model = load_model(model_path, n_ctx, n_gpu_layers, n_threads=n_threads, n_batch=n_batch)
     logger.info("Model loaded from %s", model_path)
 
     total_processed = 0
     total_errors = 0
+
+    write_queue: queue.Queue = queue.Queue(maxsize=5)
+    writer_error = threading.Event()
+    writer = threading.Thread(
+        target=_db_writer_thread,
+        args=(db, write_queue, writer_error),
+        daemon=True,
+        name="db-writer",
+    )
+    writer.start()
 
     while True:
         records = db.get_unextracted_jobs_chunked(chunk_size, 0)
@@ -212,7 +269,12 @@ def extract_jobs(
             )
 
         if successes:
-            db.update_extraction_batch(successes)
+            if writer_error.is_set():
+                logger.error("DB writer thread failed; stopping extraction.")
+                total_errors += errors_in_chunk
+                break
+            write_queue.put(successes)
+            db.mark_jobs_extracted([job_id for job_id, _ in successes])
         else:
             # No progress — all records failed. Log and stop to avoid infinite loop.
             logger.error(
@@ -225,6 +287,11 @@ def extract_jobs(
         total_processed += len(successes)
         total_errors += errors_in_chunk
         logger.info("Chunk complete: %d extracted, %d errors", len(successes), errors_in_chunk)
+
+    write_queue.put(None)
+    writer.join()
+    if writer_error.is_set():
+        logger.error("DB writer thread raised an exception during drain.")
 
     logger.info("Extraction complete: %d extracted, %d errors", total_processed, total_errors)
     return total_processed, total_errors
@@ -263,6 +330,8 @@ def main() -> None:
             n_ctx=config.extraction_n_ctx,
             n_gpu_layers=config.extraction_n_gpu_layers,
             max_retries=config.extraction_max_retries,
+            n_threads=config.extraction_n_threads,
+            n_batch=config.extraction_n_batch,
         )
         db.finish_pipeline_run(run_id, "success", jobs_processed=processed, jobs_skipped=errors)
         logger.info("Extraction step completed successfully")

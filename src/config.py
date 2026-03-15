@@ -60,6 +60,12 @@ class Config:
     extraction_n_gpu_layers: int = field(
         default_factory=lambda: int(os.environ.get("EXTRACTION_N_GPU_LAYERS", "-1"))
     )
+    extraction_n_threads: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_N_THREADS", "8"))
+    )
+    extraction_n_batch: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_N_BATCH", "256"))
+    )
 
     # Logging
     log_level: str = field(
@@ -84,4 +90,8 @@ def load_config() -> Config:
         raise ValueError("EXTRACTION_CHUNK_SIZE must be >= 1")
     if config.extraction_max_retries < 0:
         raise ValueError("EXTRACTION_MAX_RETRIES must be >= 0")
+    if config.extraction_n_threads < 1:
+        raise ValueError("EXTRACTION_N_THREADS must be >= 1")
+    if config.extraction_n_batch < 1:
+        raise ValueError("EXTRACTION_N_BATCH must be >= 1")
     return config

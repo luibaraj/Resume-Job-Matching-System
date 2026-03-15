@@ -359,6 +359,20 @@ class DatabaseManager:
                 [(job_id,) for job_id in job_ids],
             )
 
+    def mark_jobs_extracted(self, job_ids: list[int]) -> None:
+        """Set extracted=1 on jobs by ID without writing to job_extractions.
+
+        Used by the extraction pipeline to optimistically mark jobs as done
+        before the async writer thread flushes the full extraction data.
+        """
+        if not job_ids:
+            return
+        with self.get_connection() as conn:
+            conn.executemany(
+                "UPDATE jobs SET extracted=1 WHERE id=?",
+                [(job_id,) for job_id in job_ids],
+            )
+
     def create_pipeline_run(self, run_date: str, step: str) -> int:
         """Create a pipeline_runs audit log entry.
 
