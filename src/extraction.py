@@ -158,30 +158,39 @@ def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] 
         logger.warning("Job %d has no cleaned_description, skipping", job_id)
         return None
 
-    try:
-        user_message = SKELETON_TEMPLATE.replace("{text}", cleaned_description)
-        response = model.create_chat_completion(
-            messages=[
-                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=512,
-            temperature=0.0,
-        )
-        content = response["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
-        return (job_id, parsed)
-    except json.JSONDecodeError as e:
-        logger.warning("Job %d: invalid JSON from model: %s", job_id, e)
-        return None
-    except jsonschema.ValidationError as e:
-        logger.warning("Job %d: schema validation failed: %s", job_id, e.message)
-        return None
-    except Exception as e:
-        logger.warning("Job %d: extraction failed: %s", job_id, e)
-        return None
+    user_message = SKELETON_TEMPLATE.replace("{text}", cleaned_description)
+    token_limits = [512, 1024]
+
+    for attempt, max_tokens in enumerate(token_limits):
+        try:
+            response = model.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+                temperature=0.0,
+            )
+            content = response["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
+            return (job_id, parsed)
+        except json.JSONDecodeError as e:
+            if attempt < len(token_limits) - 1:
+                logger.warning(
+                    "Job %d: invalid JSON (max_tokens=%d), retrying with max_tokens=%d",
+                    job_id, max_tokens, token_limits[attempt + 1],
+                )
+                continue
+            logger.warning("Job %d: invalid JSON after retry: %s", job_id, e)
+            return None
+        except jsonschema.ValidationError as e:
+            logger.warning("Job %d: schema validation failed: %s", job_id, e.message)
+            return None
+        except Exception as e:
+            logger.warning("Job %d: extraction failed: %s", job_id, e)
+            return None
 
 
 def extract_jobs(

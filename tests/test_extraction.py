@@ -223,6 +223,33 @@ class TestExtractJob:
         model.create_chat_completion.return_value = _make_model_response("not json {{")
         result = extract_job((1, "desc", "title"), model)
         assert result is None
+        # Both token-limit attempts should have been made
+        assert model.create_chat_completion.call_count == 2
+
+    def test_invalid_json_first_attempt_succeeds_on_retry(self):
+        model = MagicMock()
+        model.create_chat_completion.side_effect = [
+            _make_model_response("not json {{"),
+            _make_model_response(json.dumps(VALID_EXTRACTION)),
+        ]
+        result = extract_job((1, "desc", "title"), model)
+        assert result is not None
+        job_id, data = result
+        assert job_id == 1
+        assert model.create_chat_completion.call_count == 2
+        # Retry call must use max_tokens=1024
+        retry_kwargs = model.create_chat_completion.call_args_list[1][1]
+        assert retry_kwargs["max_tokens"] == 1024
+
+    def test_invalid_json_both_attempts_fail_returns_none(self):
+        model = MagicMock()
+        model.create_chat_completion.side_effect = [
+            _make_model_response("not json {{"),
+            _make_model_response("still not json {{"),
+        ]
+        result = extract_job((1, "desc", "title"), model)
+        assert result is None
+        assert model.create_chat_completion.call_count == 2
 
     def test_schema_mismatch_returns_none(self):
         model = MagicMock()
