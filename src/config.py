@@ -45,26 +45,17 @@ class Config:
     )
 
     # Extraction
-    extraction_model_path: str = field(
-        default_factory=lambda: os.environ.get("EXTRACTION_MODEL_PATH", "")
+    google_api_key: str = field(
+        default_factory=lambda: os.environ.get("GOOGLE_API_KEY", "")
+    )
+    extraction_model_id: str = field(
+        default_factory=lambda: os.environ.get("EXTRACTION_MODEL_ID", "gemini-2.5-flash")
     )
     extraction_chunk_size: int = field(
         default_factory=lambda: int(os.environ.get("EXTRACTION_CHUNK_SIZE", "50"))
     )
     extraction_max_retries: int = field(
         default_factory=lambda: int(os.environ.get("EXTRACTION_MAX_RETRIES", "2"))
-    )
-    extraction_n_ctx: int = field(
-        default_factory=lambda: int(os.environ.get("EXTRACTION_N_CTX", "2048"))
-    )
-    extraction_n_gpu_layers: int = field(
-        default_factory=lambda: int(os.environ.get("EXTRACTION_N_GPU_LAYERS", "-1"))
-    )
-    extraction_n_threads: int = field(
-        default_factory=lambda: int(os.environ.get("EXTRACTION_N_THREADS", "8"))
-    )
-    extraction_n_batch: int = field(
-        default_factory=lambda: int(os.environ.get("EXTRACTION_N_BATCH", "256"))
     )
 
     # Embedding
@@ -114,14 +105,12 @@ def load_config() -> Config:
         raise ValueError("PREPROCESSING_CHUNK_SIZE must be >= 1")
     if config.preprocessing_max_retries < 0:
         raise ValueError("PREPROCESSING_MAX_RETRIES must be >= 0")
+    if not config.google_api_key:
+        raise ValueError("GOOGLE_API_KEY must be set")
     if config.extraction_chunk_size < 1:
         raise ValueError("EXTRACTION_CHUNK_SIZE must be >= 1")
     if config.extraction_max_retries < 0:
         raise ValueError("EXTRACTION_MAX_RETRIES must be >= 0")
-    if config.extraction_n_threads < 1:
-        raise ValueError("EXTRACTION_N_THREADS must be >= 1")
-    if config.extraction_n_batch < 1:
-        raise ValueError("EXTRACTION_N_BATCH must be >= 1")
     if config.embedding_chunk_size < 1:
         raise ValueError("EMBEDDING_CHUNK_SIZE must be >= 1")
     if config.embedding_batch_size < 1:

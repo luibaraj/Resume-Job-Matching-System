@@ -4,11 +4,13 @@ import os
 import queue
 import threading
 
+from google import genai
+
 from src.utils import setup_logging
 
 
 """
-System prompt for fine-tuned Llama 3.2 Information Extraction Model
+System prompt for Gemini-based Information Extraction
 Aligned with job matching pipeline (data collection → extraction → embeddings → retrieval → reranking)
 """
 
@@ -34,7 +36,7 @@ Job Description:
 Fill this skeleton:
 {{"job_title":"","responsibilities":[],"skills":[],"tools_and_platforms":[],"education":"","experience":{{"min_years":-1,"is_inferred":true}}}}"""
 
-# JSON Schema for Llama output validation
+# JSON Schema for Gemini output validation
 EXTRACTION_JSON_SCHEMA = {
     "type": "object",
     "properties": {
@@ -80,33 +82,6 @@ EXTRACTION_JSON_SCHEMA = {
 }
 
 
-def load_model(model_path: str, n_ctx: int, n_gpu_layers: int,
-               n_threads: int = 8, n_batch: int = 256):
-    """Load the Llama model from a GGUF file.
-
-    Args:
-        model_path: Path to the GGUF model file
-        n_ctx: Context window size
-        n_gpu_layers: Number of layers to offload to GPU (-1 = all)
-        n_threads: Number of CPU threads for inference
-        n_batch: Max tokens per prefill batch (affects peak RAM during prompt eval)
-
-    Returns:
-        Llama model instance
-    """
-    from llama_cpp import Llama
-
-    return Llama(
-        model_path=model_path,
-        n_ctx=n_ctx,
-        n_gpu_layers=n_gpu_layers,
-        n_batch=n_batch,
-        n_threads=n_threads,
-        use_mlock=True,
-        verbose=False,
-    )
-
-
 def _db_writer_thread(db, write_queue: queue.Queue,
                       writer_error: threading.Event) -> None:
     """Background thread that drains write_queue and flushes batches to DB.
@@ -139,12 +114,13 @@ def _db_writer_thread(db, write_queue: queue.Queue,
             write_queue.task_done()
 
 
-def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] | None:
+def extract_job(record: tuple[int, str | None, str], client, model_id: str) -> tuple[int, dict] | None:
     """Run extraction on a single job record.
 
     Args:
         record: (job_id, cleaned_description, title)
-        model: Loaded Llama model instance
+        client: Gemini genai.Client instance
+        model_id: Gemini model ID (e.g. "gemini-2.5-flash")
 
     Returns:
         (job_id, extracted_dict) on success, None on any failure
@@ -158,21 +134,21 @@ def extract_job(record: tuple[int, str | None, str], model) -> tuple[int, dict] 
         logger.warning("Job %d has no cleaned_description, skipping", job_id)
         return None
 
-    user_message = SKELETON_TEMPLATE.replace("{text}", cleaned_description)
+    prompt = EXTRACTION_SYSTEM_PROMPT + "\n\n" + SKELETON_TEMPLATE.replace("{text}", cleaned_description)
     token_limits = [512, 1024]
 
     for attempt, max_tokens in enumerate(token_limits):
         try:
-            response = model.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens,
-                temperature=0.0,
+            response = client.models.generate_content(
+                model=model_id,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=max_tokens,
+                    response_mime_type="application/json",
+                ),
             )
-            content = response["choices"][0]["message"]["content"]
+            content = response.text
             parsed = json.loads(content)
             jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
             return (job_id, parsed)
@@ -197,12 +173,9 @@ def extract_jobs(
     db,
     run_id: int,
     chunk_size: int,
-    model_path: str,
-    n_ctx: int,
-    n_gpu_layers: int,
+    api_key: str,
+    model_id: str,
     max_retries: int = 2,
-    n_threads: int = 8,
-    n_batch: int = 256,
 ) -> tuple[int, int]:
     """Run extraction over all preprocessed, unextracted jobs in chunked batches.
 
@@ -213,9 +186,8 @@ def extract_jobs(
         db: DatabaseManager instance
         run_id: Pipeline run ID for audit logging
         chunk_size: Number of records per batch
-        model_path: Path to GGUF model file
-        n_ctx: Context window size
-        n_gpu_layers: GPU layers to offload (-1 = all)
+        api_key: Google API key for Gemini
+        model_id: Gemini model ID (e.g. "gemini-2.5-flash")
         max_retries: Max retries for failed records per chunk
 
     Returns:
@@ -224,8 +196,8 @@ def extract_jobs(
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     logger = setup_logging(log_level=log_level, name="extract_jobs")
 
-    model = load_model(model_path, n_ctx, n_gpu_layers, n_threads=n_threads, n_batch=n_batch)
-    logger.info("Model loaded from %s", model_path)
+    client = genai.Client(api_key=api_key)
+    logger.info("Gemini client initialized with model %s", model_id)
 
     total_processed = 0
     total_errors = 0
@@ -247,7 +219,7 @@ def extract_jobs(
 
         logger.info("Processing chunk: %d records", len(records))
 
-        results = [extract_job(r, model) for r in records]
+        results = [extract_job(r, client, model_id) for r in records]
         successes = [r for r in results if r is not None]
         errors_in_chunk = len(records) - len(successes)
 
@@ -265,7 +237,7 @@ def extract_jobs(
                 len(missing_ids), attempt, max_retries, sorted(missing_ids),
             )
             records_to_retry = [r for r in records if r[0] in missing_ids]
-            retry_results = [extract_job(r, model) for r in records_to_retry]
+            retry_results = [extract_job(r, client, model_id) for r in records_to_retry]
             retry_successes = [r for r in retry_results if r is not None]
             successes.extend(retry_successes)
             output_ids = {r[0] for r in successes}
@@ -322,9 +294,6 @@ def main() -> None:
         config = load_config()
         logger.setLevel(config.log_level)
 
-        if not config.extraction_model_path:
-            raise ValueError("EXTRACTION_MODEL_PATH must be set")
-
         db = DatabaseManager(config.db_path)
         db.initialize_schema()
 
@@ -335,12 +304,9 @@ def main() -> None:
             db,
             run_id,
             chunk_size=config.extraction_chunk_size,
-            model_path=config.extraction_model_path,
-            n_ctx=config.extraction_n_ctx,
-            n_gpu_layers=config.extraction_n_gpu_layers,
+            api_key=config.google_api_key,
+            model_id=config.extraction_model_id,
             max_retries=config.extraction_max_retries,
-            n_threads=config.extraction_n_threads,
-            n_batch=config.extraction_n_batch,
         )
         db.finish_pipeline_run(run_id, "success", jobs_processed=processed, jobs_skipped=errors)
         logger.info("Extraction step completed successfully")

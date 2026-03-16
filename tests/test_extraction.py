@@ -57,8 +57,10 @@ def _insert_preprocessed_job(db: DatabaseManager, job_id_override=None) -> int:
         return row[0]
 
 
-def _make_model_response(content: str) -> dict:
-    return {"choices": [{"message": {"content": content}}]}
+def _make_gemini_response(content: str) -> MagicMock:
+    response = MagicMock()
+    response.text = content
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -197,78 +199,73 @@ class TestJsonSchemaValidation:
 
 
 # ---------------------------------------------------------------------------
-# extract_job with mocked Llama
+# extract_job with mocked Gemini client
 # ---------------------------------------------------------------------------
 
 
 class TestExtractJob:
+    MODEL_ID = "gemini-2.5-flash"
+
     def test_success_returns_tuple(self):
-        model = MagicMock()
-        model.create_chat_completion.return_value = _make_model_response(
+        client = MagicMock()
+        client.models.generate_content.return_value = _make_gemini_response(
             json.dumps(VALID_EXTRACTION)
         )
-        result = extract_job((42, "Some job description text", "Software Engineer"), model)
+        result = extract_job((42, "Some job description text", "Software Engineer"), client, self.MODEL_ID)
         assert result is not None
         job_id, data = result
         assert job_id == 42
         assert data["job_title"] == "Software Engineer"
-        call_kwargs = model.create_chat_completion.call_args[1]
-        assert len(call_kwargs["messages"]) == 2
-        assert call_kwargs["messages"][0]["role"] == "system"
-        assert call_kwargs["messages"][1]["role"] == "user"
-        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert client.models.generate_content.call_count == 1
 
     def test_invalid_json_returns_none(self):
-        model = MagicMock()
-        model.create_chat_completion.return_value = _make_model_response("not json {{")
-        result = extract_job((1, "desc", "title"), model)
+        client = MagicMock()
+        client.models.generate_content.return_value = _make_gemini_response("not json {{")
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
         # Both token-limit attempts should have been made
-        assert model.create_chat_completion.call_count == 2
+        assert client.models.generate_content.call_count == 2
 
     def test_invalid_json_first_attempt_succeeds_on_retry(self):
-        model = MagicMock()
-        model.create_chat_completion.side_effect = [
-            _make_model_response("not json {{"),
-            _make_model_response(json.dumps(VALID_EXTRACTION)),
+        client = MagicMock()
+        client.models.generate_content.side_effect = [
+            _make_gemini_response("not json {{"),
+            _make_gemini_response(json.dumps(VALID_EXTRACTION)),
         ]
-        result = extract_job((1, "desc", "title"), model)
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is not None
         job_id, data = result
         assert job_id == 1
-        assert model.create_chat_completion.call_count == 2
-        # Retry call must use max_tokens=1024
-        retry_kwargs = model.create_chat_completion.call_args_list[1][1]
-        assert retry_kwargs["max_tokens"] == 1024
+        assert client.models.generate_content.call_count == 2
 
     def test_invalid_json_both_attempts_fail_returns_none(self):
-        model = MagicMock()
-        model.create_chat_completion.side_effect = [
-            _make_model_response("not json {{"),
-            _make_model_response("still not json {{"),
+        client = MagicMock()
+        client.models.generate_content.side_effect = [
+            _make_gemini_response("not json {{"),
+            _make_gemini_response("still not json {{"),
         ]
-        result = extract_job((1, "desc", "title"), model)
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
-        assert model.create_chat_completion.call_count == 2
+        assert client.models.generate_content.call_count == 2
 
     def test_schema_mismatch_returns_none(self):
-        model = MagicMock()
+        client = MagicMock()
         bad = {k: v for k, v in VALID_EXTRACTION.items() if k != "job_title"}
-        model.create_chat_completion.return_value = _make_model_response(json.dumps(bad))
-        result = extract_job((1, "desc", "title"), model)
+        client.models.generate_content.return_value = _make_gemini_response(json.dumps(bad))
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
 
     def test_model_exception_returns_none(self):
-        model = MagicMock()
-        model.create_chat_completion.side_effect = RuntimeError("GPU OOM")
-        result = extract_job((1, "desc", "title"), model)
+        client = MagicMock()
+        client.models.generate_content.side_effect = RuntimeError("API error")
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
 
     def test_none_description_returns_none(self):
-        model = MagicMock()
-        result = extract_job((1, None, "title"), model)
+        client = MagicMock()
+        result = extract_job((1, None, "title"), client, self.MODEL_ID)
         assert result is None
-        model.create_chat_completion.assert_not_called()
+        client.models.generate_content.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -277,21 +274,22 @@ class TestExtractJob:
 
 
 class TestExtractJobsLoop:
-    def _make_mock_model(self):
-        model = MagicMock()
-        model.create_chat_completion.return_value = _make_model_response(
+    def _make_mock_client(self):
+        client = MagicMock()
+        client.models.generate_content.return_value = _make_gemini_response(
             json.dumps(VALID_EXTRACTION)
         )
-        return model
+        return client
 
     def test_processes_all_jobs(self, db_manager):
         for i in range(3):
             _insert_preprocessed_job(db_manager, job_id_override=3000 + i)
 
-        with patch("src.extraction.load_model", return_value=self._make_mock_model()):
+        mock_client = self._make_mock_client()
+        with patch("src.extraction.genai.Client", return_value=mock_client):
             processed, errors = extract_jobs(
                 db_manager, run_id=1, chunk_size=10,
-                model_path="/fake/model.gguf", n_ctx=2048, n_gpu_layers=-1,
+                api_key="fake-key", model_id="gemini-2.5-flash",
             )
 
         assert processed == 3
@@ -303,14 +301,15 @@ class TestExtractJobsLoop:
     def test_idempotent_second_run(self, db_manager):
         _insert_preprocessed_job(db_manager, job_id_override=4000)
 
-        with patch("src.extraction.load_model", return_value=self._make_mock_model()):
+        mock_client = self._make_mock_client()
+        with patch("src.extraction.genai.Client", return_value=mock_client):
             extract_jobs(
                 db_manager, run_id=1, chunk_size=10,
-                model_path="/fake/model.gguf", n_ctx=2048, n_gpu_layers=-1,
+                api_key="fake-key", model_id="gemini-2.5-flash",
             )
             processed2, errors2 = extract_jobs(
                 db_manager, run_id=2, chunk_size=10,
-                model_path="/fake/model.gguf", n_ctx=2048, n_gpu_layers=-1,
+                api_key="fake-key", model_id="gemini-2.5-flash",
             )
 
         assert processed2 == 0
@@ -326,14 +325,14 @@ class TestExtractJobsLoop:
         for i in range(3):
             _insert_preprocessed_job(db_manager, job_id_override=5000 + i)
 
-        # Always fail — model raises on every call
-        model = MagicMock()
-        model.create_chat_completion.side_effect = RuntimeError("GPU OOM")
+        # Always fail — client raises on every call
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = RuntimeError("API error")
 
-        with patch("src.extraction.load_model", return_value=model):
+        with patch("src.extraction.genai.Client", return_value=mock_client):
             processed, errors = extract_jobs(
                 db_manager, run_id=1, chunk_size=10,
-                model_path="/fake/model.gguf", n_ctx=2048, n_gpu_layers=-1,
+                api_key="fake-key", model_id="gemini-2.5-flash",
                 max_retries=0,
             )
 
