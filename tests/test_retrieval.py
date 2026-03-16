@@ -67,7 +67,7 @@ def _insert_embedded_job(
     db.insert_job(base)
     with db.get_connection() as conn:
         conn.execute(
-            "UPDATE jobs SET cleaned_description=?, preprocessed=1, extracted=1, embedded=1 WHERE greenhouse_id=?",
+            "UPDATE jobs SET cleaned_description=?, preprocessed=1, extracted=1, embedded=1, is_target_role=1 WHERE greenhouse_id=?",
             (description, greenhouse_id),
         )
         row = conn.execute(
@@ -160,7 +160,7 @@ class TestGetAllCleanedDescriptions:
         db_manager.insert_job(base)
         with db_manager.get_connection() as conn:
             conn.execute(
-                "UPDATE jobs SET cleaned_description='desc', preprocessed=1, extracted=1 WHERE greenhouse_id=1002"
+                "UPDATE jobs SET cleaned_description='desc', preprocessed=1, extracted=1, is_target_role=1 WHERE greenhouse_id=1002"
             )
         result = db_manager.get_all_cleaned_descriptions()
         assert len(result) == 1

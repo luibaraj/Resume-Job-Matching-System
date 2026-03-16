@@ -42,6 +42,7 @@ class DatabaseManager:
                     updated_at_source   TEXT,
                     collected_at        TEXT    NOT NULL,
                     is_us               INTEGER,
+                    is_target_role      INTEGER,
                     preprocessed        INTEGER NOT NULL DEFAULT 0,
                     extracted           INTEGER NOT NULL DEFAULT 0,
                     embedded            INTEGER NOT NULL DEFAULT 0,
@@ -118,6 +119,12 @@ class DatabaseManager:
             try:
                 with self.get_connection() as conn:
                     conn.execute("ALTER TABLE jobs ADD COLUMN is_us INTEGER")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            # Add is_target_role column for existing databases
+            try:
+                with self.get_connection() as conn:
+                    conn.execute("ALTER TABLE jobs ADD COLUMN is_target_role INTEGER")
             except sqlite3.OperationalError:
                 pass  # column already exists
 
@@ -331,6 +338,38 @@ class DatabaseManager:
                 rows,
             )
 
+    def get_unclassified_roles_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str]]:
+        """Fetch a chunk of preprocessed jobs that have not yet been role-classified.
+
+        Args:
+            chunk_size: Number of records to fetch
+            offset: Number of records to skip
+
+        Returns:
+            List of (id, title) tuples
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, title FROM jobs WHERE preprocessed=1 AND is_target_role IS NULL ORDER BY id LIMIT ? OFFSET ?",
+                (chunk_size, offset),
+            )
+            return [(row[0], row[1]) for row in cursor.fetchall()]
+
+    def update_target_role_batch(self, updates: list[tuple[int, int]]) -> None:
+        """Set is_target_role for a batch of jobs.
+
+        Args:
+            updates: List of (job_id, is_target_role) tuples where is_target_role is 1 or 0
+        """
+        if not updates:
+            return
+        rows = [(is_target, job_id) for job_id, is_target in updates]
+        with self.get_connection() as conn:
+            conn.executemany(
+                "UPDATE jobs SET is_target_role = ? WHERE id = ?",
+                rows,
+            )
+
     def get_unextracted_jobs_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str | None, str]]:
         """Fetch a chunk of preprocessed but unextracted jobs.
 
@@ -346,7 +385,7 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT id, cleaned_description, title FROM jobs WHERE preprocessed=1 AND extracted=0 ORDER BY id LIMIT ? OFFSET ?",
+                "SELECT id, cleaned_description, title FROM jobs WHERE preprocessed=1 AND extracted=0 AND is_target_role=1 ORDER BY id LIMIT ? OFFSET ?",
                 (chunk_size, offset),
             )
             return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
@@ -425,7 +464,7 @@ class DatabaseManager:
                 SELECT j.id, e.job_title, e.responsibilities, e.skills, e.tools_and_platforms
                 FROM jobs j
                 JOIN job_extractions e ON e.job_id = j.id
-                WHERE j.extracted = 1 AND j.embedded = 0
+                WHERE j.extracted = 1 AND j.embedded = 0 AND j.is_target_role = 1
                 ORDER BY j.id
                 LIMIT ? OFFSET ?
                 """,
@@ -530,7 +569,7 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT job_id, embedding FROM job_embeddings WHERE model_id = ? ORDER BY job_id",
+                "SELECT e.job_id, e.embedding FROM job_embeddings e JOIN jobs j ON j.id = e.job_id WHERE e.model_id = ? AND j.is_target_role = 1 ORDER BY e.job_id",
                 (model_id,),
             )
             return [(row[0], bytes(row[1])) for row in cursor.fetchall()]
@@ -548,7 +587,7 @@ class DatabaseManager:
                 """
                 SELECT id, cleaned_description
                 FROM jobs
-                WHERE embedded = 1 AND cleaned_description IS NOT NULL
+                WHERE embedded = 1 AND cleaned_description IS NOT NULL AND is_target_role = 1
                 ORDER BY id
                 """,
             )

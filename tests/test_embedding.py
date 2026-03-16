@@ -55,7 +55,7 @@ def _insert_extracted_job(db: DatabaseManager, greenhouse_id: int = 9001) -> int
     db.insert_job(base)
     with db.get_connection() as conn:
         conn.execute(
-            "UPDATE jobs SET cleaned_description=?, preprocessed=1, extracted=1 WHERE greenhouse_id=?",
+            "UPDATE jobs SET cleaned_description=?, preprocessed=1, extracted=1, is_target_role=1 WHERE greenhouse_id=?",
             ("Machine learning engineer role requiring Python.", greenhouse_id),
         )
         row = conn.execute(

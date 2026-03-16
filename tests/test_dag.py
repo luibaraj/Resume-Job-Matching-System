@@ -67,9 +67,13 @@ class TestDagStructure:
         """preprocess_jobs task exists."""
         assert "preprocess_jobs" in loaded_dag.task_ids
 
-    def test_task_count_is_three(self, loaded_dag):
-        """DAG has exactly 3 tasks."""
-        assert len(loaded_dag.tasks) == 3
+    def test_task_count_is_four(self, loaded_dag):
+        """DAG has exactly 4 tasks."""
+        assert len(loaded_dag.tasks) == 4
+
+    def test_has_filter_roles_task(self, loaded_dag):
+        """filter_roles task exists."""
+        assert "filter_roles" in loaded_dag.task_ids
 
     def test_has_extract_jobs_task(self, loaded_dag):
         """extract_jobs task exists."""
@@ -103,10 +107,15 @@ class TestDagTaskDependency:
         collect_task = loaded_dag.get_task("collect_jobs")
         assert len(collect_task.upstream_task_ids) == 0
 
-    def test_preprocess_downstream_is_extract(self, loaded_dag):
-        """preprocess_jobs is upstream of extract_jobs."""
+    def test_preprocess_downstream_is_filter_roles(self, loaded_dag):
+        """preprocess_jobs is upstream of filter_roles."""
         preprocess_task = loaded_dag.get_task("preprocess_jobs")
-        assert "extract_jobs" in preprocess_task.downstream_task_ids
+        assert "filter_roles" in preprocess_task.downstream_task_ids
+
+    def test_filter_roles_downstream_is_extract(self, loaded_dag):
+        """filter_roles is upstream of extract_jobs."""
+        filter_task = loaded_dag.get_task("filter_roles")
+        assert "extract_jobs" in filter_task.downstream_task_ids
 
     def test_extract_has_no_downstream(self, loaded_dag):
         """extract_jobs has no downstream tasks."""

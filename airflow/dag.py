@@ -45,6 +45,7 @@ LOG_LEVEL = _get("LOG_LEVEL", "INFO")
 DATA_HOST_PATH = _get("DATA_HOST_PATH")
 COLLECTION_IMAGE = _get("COLLECTION_IMAGE", "job-collection:latest")
 PREPROCESSING_IMAGE = _get("PREPROCESSING_IMAGE", "job-preprocessing:latest")
+ROLE_FILTER_IMAGE = _get("ROLE_FILTER_IMAGE", "job-role-filter:latest")
 EXTRACTION_IMAGE = _get("EXTRACTION_IMAGE", "job-extraction:latest")
 GOOGLE_API_KEY = _get("GOOGLE_API_KEY")
 
@@ -108,6 +109,22 @@ with DAG(
         do_xcom_push=False,
     )
 
+    filter_roles_task = DockerOperator(
+        task_id="filter_roles",
+        image=ROLE_FILTER_IMAGE,
+        environment={
+            "DB_PATH": "/data/jobs.db",
+            "LOG_LEVEL": LOG_LEVEL,
+        },
+        mounts=[shared_data_mount],
+        mount_tmp_dir=False,
+        network_mode="bridge",
+        auto_remove="success",
+        docker_url="unix://var/run/docker.sock",
+        retrieve_output=False,
+        do_xcom_push=False,
+    )
+
     extract_jobs_task = DockerOperator(
         task_id="extract_jobs",
         image=EXTRACTION_IMAGE,
@@ -125,4 +142,4 @@ with DAG(
         do_xcom_push=False,
     )
 
-    collect_jobs >> preprocess_jobs >> extract_jobs_task
+    collect_jobs >> preprocess_jobs >> filter_roles_task >> extract_jobs_task

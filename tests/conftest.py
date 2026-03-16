@@ -97,3 +97,43 @@ def duplicate_normalized_job(normalized_job) -> dict:
     Used to assert that insert_job() returns False on duplicate.
     """
     return dict(normalized_job)
+
+
+def insert_preprocessed_and_target_job(db_manager: DatabaseManager, greenhouse_id: int, title: str) -> int:
+    """Helper: Insert a job marked as preprocessed=1 AND is_target_role=1.
+
+    Used by tests for extraction, embedding, and retrieval stages that need
+    jobs to pass the role filtering stage.
+
+    Args:
+        db_manager: DatabaseManager instance
+        greenhouse_id: Greenhouse job ID
+        title: Job title
+
+    Returns:
+        The job ID of the inserted job
+    """
+    job_dict = {
+        "greenhouse_id": greenhouse_id,
+        "board_token": "test-board",
+        "title": title,
+        "company": "Test Company",
+        "location": "San Francisco, CA",
+        "raw_description": "Sample job description.",
+        "absolute_url": "https://example.com",
+        "updated_at_source": "2026-03-16T00:00:00Z",
+        "departments": '["Engineering"]',
+        "offices": '["San Francisco"]',
+        "collected_at": "2026-03-16T00:00:00Z",
+    }
+    db_manager.insert_job(job_dict)
+
+    with db_manager.get_connection() as conn:
+        cursor = conn.execute("SELECT id FROM jobs WHERE greenhouse_id = ?", (greenhouse_id,))
+        job_id = cursor.fetchone()[0]
+        conn.execute(
+            "UPDATE jobs SET preprocessed = 1, is_target_role = 1 WHERE id = ?",
+            (job_id,),
+        )
+
+    return job_id
