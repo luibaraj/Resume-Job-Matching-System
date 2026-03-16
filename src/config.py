@@ -84,6 +84,17 @@ class Config:
         default_factory=lambda: int(os.environ.get("EMBEDDING_NUM_WORKERS", "4"))
     )
 
+    # Retrieval
+    retrieval_top_k: int = field(
+        default_factory=lambda: int(os.environ.get("RETRIEVAL_TOP_K", "100"))
+    )
+    retrieval_user_profile_path: str = field(
+        default_factory=lambda: os.environ.get("RETRIEVAL_USER_PROFILE_PATH", "data/user_profile.txt")
+    )
+    retrieval_rrf_k: int = field(
+        default_factory=lambda: int(os.environ.get("RETRIEVAL_RRF_K", "60"))
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
@@ -119,4 +130,10 @@ def load_config() -> Config:
         raise ValueError("EMBEDDING_MAX_RETRIES must be >= 0")
     if config.embedding_num_workers < 1:
         raise ValueError("EMBEDDING_NUM_WORKERS must be >= 1")
+    if config.retrieval_top_k < 1:
+        raise ValueError("RETRIEVAL_TOP_K must be >= 1")
+    if not config.retrieval_user_profile_path:
+        raise ValueError("RETRIEVAL_USER_PROFILE_PATH must not be empty")
+    if config.retrieval_rrf_k < 1:
+        raise ValueError("RETRIEVAL_RRF_K must be >= 1")
     return config

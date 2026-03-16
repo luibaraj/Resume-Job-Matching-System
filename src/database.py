@@ -88,6 +88,18 @@ class DatabaseManager:
                     started_at      TEXT    NOT NULL DEFAULT (datetime('now')),
                     finished_at     TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS job_matches (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    score           REAL    NOT NULL,
+                    rank            INTEGER NOT NULL,
+                    model_id        TEXT    NOT NULL,
+                    retrieved_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_matches_rank ON job_matches(rank);
+                CREATE INDEX IF NOT EXISTS idx_job_matches_job_id ON job_matches(job_id);
                 """
             )
             # Add is_us column for existing databases
@@ -494,3 +506,79 @@ class DatabaseManager:
                 """,
                 (status, jobs_processed, jobs_skipped, error_message, finished_at, run_id),
             )
+
+    def get_all_embeddings(self, model_id: str) -> list[tuple[int, bytes]]:
+        """Fetch all job embeddings produced by a given model.
+
+        Args:
+            model_id: Model identifier to filter by
+
+        Returns:
+            List of (job_id, embedding_blob) tuples ordered by job_id
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT job_id, embedding FROM job_embeddings WHERE model_id = ? ORDER BY job_id",
+                (model_id,),
+            )
+            return [(row[0], bytes(row[1])) for row in cursor.fetchall()]
+
+    def get_all_cleaned_descriptions(self) -> list[tuple[int, str]]:
+        """Fetch cleaned descriptions for all embedded jobs.
+
+        Only returns jobs that have been embedded so both corpora remain aligned.
+
+        Returns:
+            List of (job_id, cleaned_description) tuples ordered by job_id
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, cleaned_description
+                FROM jobs
+                WHERE embedded = 1 AND cleaned_description IS NOT NULL
+                ORDER BY id
+                """,
+            )
+            return [(row[0], row[1]) for row in cursor.fetchall()]
+
+    def insert_job_matches(self, matches: list[tuple[int, float, int, str]]) -> None:
+        """Replace all job_matches rows with new retrieval results.
+
+        Deletes all prior results and inserts the new batch in one transaction,
+        so re-runs never leave stale rows from a prior run's larger top-k.
+
+        Args:
+            matches: List of (job_id, score, rank, model_id) tuples
+        """
+        if not matches:
+            return
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM job_matches")
+            conn.executemany(
+                """
+                INSERT INTO job_matches (job_id, score, rank, model_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                matches,
+            )
+
+    def get_job_matches(self, limit: Optional[int] = None) -> list[tuple[int, float, int]]:
+        """Read job_matches ordered by rank ascending.
+
+        Called by reranking.py to consume retrieval results.
+
+        Args:
+            limit: Optional cap on number of results
+
+        Returns:
+            List of (job_id, score, rank) tuples
+        """
+        sql = "SELECT job_id, score, rank FROM job_matches ORDER BY rank ASC"
+        params: tuple = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        with self.get_connection() as conn:
+            cursor = conn.execute(sql, params)
+            return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
