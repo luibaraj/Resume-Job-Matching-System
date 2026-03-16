@@ -1,0 +1,37 @@
+== EXPERIENCE ==
+
+Materials Research Lab — Data Science Research Intern (Jan 2025 - Jun 2025)
+- Performed exploratory data analysis on large materials simulation datasets to uncover trends, patterns, and data quality issues.
+- Communicated findings to research supervisor to advocate for an anomaly detection solution.
+- Proposed and built a proof-of-concept anomaly detection algorithm (non-production) to demonstrate how data quality and result reliability could be improved.
+- Designed the algorithm using both supervised and unsupervised machine learning: clustered simulations, separated polymer classes, and flagged faulty outputs.
+- Cleaned, wrangled, and transformed large simulation datasets to train and validate the proof-of-concept models.
+- Used a convolutional autoencoder as the supervised component to reduce dimensionality by >99%, enabling efficient large-scale training.
+- Tech Stack: Python, Pandas, NumPy, Scikit-learn, PyTorch, Matplotlib
+
+YouROK Corp — Data Scientist Intern (Mar 2024 - Sep 2024)
+- Built an LLM-based application that provides on-demand guidance to adolescents facing daily challenges, with a focus on emotional resiliency for teens and college students.
+- Met with stakeholders to understand specific pain points and gather clear project requirements.
+- Led a 3-person team to design and deploy a working prototype using a Flask backend and React frontend.
+- Enabled iterative human testing and evaluation to ensure alignment with stakeholder goals.
+- Identified and curated features to feed into the LLM to improve response accuracy.
+- Tech Stack: Python, OpenAI API, Flask (REST API), React (JavaScript), PyTest
+
+Scripps Institution of Oceanography — Data Science Capstone Intern (Jan 2024 - Jun 2024)
+- Supported a PhD candidate's whale-call classification research by improving sensor data preparation steps to boost model performance.
+- Benchmarked the optimized data-prep pipeline against a baseline CNN to validate improvements.
+- Measured and visualized key performance metrics to confirm model effectiveness.
+- Built an R Shiny dashboard visualizing spatial patterns in marine migration data to support conservation research.
+- Conducted exploratory data analysis to identify dashboard features aligned with stakeholder goals.
+- Tech Stack: Python, Pandas, NumPy, PyTorch, Matplotlib, R, R Shiny
+
+UCSB MCDB Department — Data Science Research Assistant (Apr 2023 - Dec 2023)
+- Supported genetics research by prototyping clustering models in R to explore genomic population structure.
+- Identified ways to reduce confounding factors in genetic analyses through exploratory modeling.
+- Tech Stack: R
+
+== PROJECTS ==
+
+Resume Match — Full-Stack AI Engineer (Nov 2024 - present)
+- Architected an end-to-end resume-to-job matching platform that cleans user resumes, generates embeddings with OpenAI, queries a Chroma vector database, and returns reranked job openings tailored to early-career data and machine learning roles, saving users 2+ hours per day on job searching.
+- Tech Stack: Python, FastAPI, Pydantic, OpenAI API, ChromaDB, boto3, AWS S3, Requests, React, TypeScript, Vite
