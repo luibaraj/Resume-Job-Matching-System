@@ -67,6 +67,23 @@ class Config:
         default_factory=lambda: int(os.environ.get("EXTRACTION_N_BATCH", "256"))
     )
 
+    # Embedding
+    embedding_model_id: str = field(
+        default_factory=lambda: os.environ.get("EMBEDDING_MODEL_ID", "Qwen/Qwen3-Embedding-0.6B")
+    )
+    embedding_chunk_size: int = field(
+        default_factory=lambda: int(os.environ.get("EMBEDDING_CHUNK_SIZE", "256"))
+    )
+    embedding_batch_size: int = field(
+        default_factory=lambda: int(os.environ.get("EMBEDDING_BATCH_SIZE", "32"))
+    )
+    embedding_max_retries: int = field(
+        default_factory=lambda: int(os.environ.get("EMBEDDING_MAX_RETRIES", "2"))
+    )
+    embedding_num_workers: int = field(
+        default_factory=lambda: int(os.environ.get("EMBEDDING_NUM_WORKERS", "4"))
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
@@ -94,4 +111,12 @@ def load_config() -> Config:
         raise ValueError("EXTRACTION_N_THREADS must be >= 1")
     if config.extraction_n_batch < 1:
         raise ValueError("EXTRACTION_N_BATCH must be >= 1")
+    if config.embedding_chunk_size < 1:
+        raise ValueError("EMBEDDING_CHUNK_SIZE must be >= 1")
+    if config.embedding_batch_size < 1:
+        raise ValueError("EMBEDDING_BATCH_SIZE must be >= 1")
+    if config.embedding_max_retries < 0:
+        raise ValueError("EMBEDDING_MAX_RETRIES must be >= 0")
+    if config.embedding_num_workers < 1:
+        raise ValueError("EMBEDDING_NUM_WORKERS must be >= 1")
     return config

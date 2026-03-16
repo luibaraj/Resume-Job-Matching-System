@@ -67,6 +67,16 @@ class DatabaseManager:
 
                 CREATE INDEX IF NOT EXISTS idx_job_extractions_job_id ON job_extractions(job_id);
 
+                CREATE TABLE IF NOT EXISTS job_embeddings (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id      INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    embedding   BLOB    NOT NULL,
+                    model_id    TEXT    NOT NULL,
+                    embedded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_embeddings_job_id ON job_embeddings(job_id);
+
                 CREATE TABLE IF NOT EXISTS pipeline_runs (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_date        TEXT    NOT NULL,
@@ -370,6 +380,69 @@ class DatabaseManager:
         with self.get_connection() as conn:
             conn.executemany(
                 "UPDATE jobs SET extracted=1 WHERE id=?",
+                [(job_id,) for job_id in job_ids],
+            )
+
+    def get_unembedded_jobs_chunked(self, chunk_size: int, offset: int) -> list[tuple[int, str | None, str | None, str | None, str | None]]:
+        """Fetch a chunk of extracted but unembedded jobs with extraction fields.
+
+        Returns plain tuples for multiprocessing compatibility (sqlite3.Row is not picklable).
+
+        Args:
+            chunk_size: Number of records to fetch
+            offset: Number of records to skip
+
+        Returns:
+            List of (job_id, job_title, responsibilities_json, skills_json, tools_json) tuples
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT j.id, e.job_title, e.responsibilities, e.skills, e.tools_and_platforms
+                FROM jobs j
+                JOIN job_extractions e ON e.job_id = j.id
+                WHERE j.extracted = 1 AND j.embedded = 0
+                ORDER BY j.id
+                LIMIT ? OFFSET ?
+                """,
+                (chunk_size, offset),
+            )
+            return [(row[0], row[1], row[2], row[3], row[4]) for row in cursor.fetchall()]
+
+    def insert_embeddings_batch(self, updates: list[tuple[int, bytes, str]]) -> None:
+        """Write embedding blobs to job_embeddings and set embedded=1 on jobs.
+
+        Args:
+            updates: List of (job_id, embedding_blob, model_id) tuples
+        """
+        if not updates:
+            return
+
+        job_ids = [job_id for job_id, _, _ in updates]
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO job_embeddings (job_id, embedding, model_id)
+                VALUES (?, ?, ?)
+                """,
+                updates,
+            )
+            conn.executemany(
+                "UPDATE jobs SET embedded=1 WHERE id=?",
+                [(job_id,) for job_id in job_ids],
+            )
+
+    def mark_jobs_embedded(self, job_ids: list[int]) -> None:
+        """Set embedded=1 on jobs by ID without writing to job_embeddings.
+
+        Used by the embedding pipeline to optimistically mark jobs as done
+        before the async writer thread flushes the full embedding data.
+        """
+        if not job_ids:
+            return
+        with self.get_connection() as conn:
+            conn.executemany(
+                "UPDATE jobs SET embedded=1 WHERE id=?",
                 [(job_id,) for job_id in job_ids],
             )
 
