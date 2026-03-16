@@ -86,6 +86,17 @@ class Config:
         default_factory=lambda: int(os.environ.get("RETRIEVAL_RRF_K", "60"))
     )
 
+    # Reranking
+    reranking_model_id: str = field(
+        default_factory=lambda: os.environ.get("RERANKING_MODEL_ID", "Qwen/Qwen3-Reranker-0.6B")
+    )
+    reranking_top_k: int = field(
+        default_factory=lambda: int(os.environ.get("RERANKING_TOP_K", "20"))
+    )
+    reranking_batch_size: int = field(
+        default_factory=lambda: int(os.environ.get("RERANKING_BATCH_SIZE", "8"))
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
@@ -125,4 +136,8 @@ def load_config() -> Config:
         raise ValueError("RETRIEVAL_USER_PROFILE_PATH must not be empty")
     if config.retrieval_rrf_k < 1:
         raise ValueError("RETRIEVAL_RRF_K must be >= 1")
+    if config.reranking_top_k < 1:
+        raise ValueError("RERANKING_TOP_K must be >= 1")
+    if config.reranking_batch_size < 1:
+        raise ValueError("RERANKING_BATCH_SIZE must be >= 1")
     return config

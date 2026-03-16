@@ -100,6 +100,18 @@ class DatabaseManager:
 
                 CREATE INDEX IF NOT EXISTS idx_job_matches_rank ON job_matches(rank);
                 CREATE INDEX IF NOT EXISTS idx_job_matches_job_id ON job_matches(job_id);
+
+                CREATE TABLE IF NOT EXISTS job_reranked (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id      INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    score       REAL    NOT NULL,
+                    rank        INTEGER NOT NULL,
+                    model_id    TEXT    NOT NULL,
+                    reranked_at TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_reranked_rank ON job_reranked(rank);
+                CREATE INDEX IF NOT EXISTS idx_job_reranked_job_id ON job_reranked(job_id);
                 """
             )
             # Add is_us column for existing databases
@@ -558,6 +570,49 @@ class DatabaseManager:
             conn.executemany(
                 """
                 INSERT INTO job_matches (job_id, score, rank, model_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                matches,
+            )
+
+    def get_job_matches_with_text(
+        self, limit: Optional[int] = None
+    ) -> list[tuple[int, str, str, str]]:
+        """Fetch job_matches joined with job text fields for reranking.
+
+        Args:
+            limit: Optional cap on number of results
+
+        Returns:
+            List of (job_id, title, cleaned_description, company) ordered by rank ASC
+        """
+        sql = """
+            SELECT m.job_id, j.title, j.cleaned_description, j.company
+            FROM job_matches m
+            JOIN jobs j ON j.id = m.job_id
+            ORDER BY m.rank ASC
+        """
+        params: tuple = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        with self.get_connection() as conn:
+            cursor = conn.execute(sql, params)
+            return [(row[0], row[1] or "", row[2] or "", row[3] or "") for row in cursor.fetchall()]
+
+    def insert_reranked(self, matches: list[tuple[int, float, int, str]]) -> None:
+        """Replace all job_reranked rows with new results (DELETE + INSERT).
+
+        Args:
+            matches: List of (job_id, score, rank, model_id) tuples
+        """
+        if not matches:
+            return
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM job_reranked")
+            conn.executemany(
+                """
+                INSERT INTO job_reranked (job_id, score, rank, model_id)
                 VALUES (?, ?, ?, ?)
                 """,
                 matches,
