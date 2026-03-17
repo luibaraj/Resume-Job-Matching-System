@@ -113,6 +113,21 @@ class DatabaseManager:
 
                 CREATE INDEX IF NOT EXISTS idx_job_reranked_rank ON job_reranked(rank);
                 CREATE INDEX IF NOT EXISTS idx_job_reranked_job_id ON job_reranked(job_id);
+
+                CREATE TABLE IF NOT EXISTS job_summaries (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    rank            INTEGER NOT NULL,
+                    summary         TEXT    NOT NULL,
+                    citations_json  TEXT    NOT NULL,
+                    evaluation_json TEXT    NOT NULL,
+                    passed_eval     INTEGER NOT NULL DEFAULT 0,
+                    model_id        TEXT    NOT NULL,
+                    generated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_summaries_job_id ON job_summaries(job_id);
+                CREATE INDEX IF NOT EXISTS idx_job_summaries_passed_eval ON job_summaries(passed_eval);
                 """
             )
             # Add is_us column for existing databases
@@ -127,6 +142,28 @@ class DatabaseManager:
                     conn.execute("ALTER TABLE jobs ADD COLUMN is_target_role INTEGER")
             except sqlite3.OperationalError:
                 pass  # column already exists
+            # Create job_summaries table for existing databases (if schema was updated)
+            try:
+                with self.get_connection() as conn:
+                    conn.executescript(
+                        """
+                        CREATE TABLE IF NOT EXISTS job_summaries (
+                            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            job_id          INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                            rank            INTEGER NOT NULL,
+                            summary         TEXT    NOT NULL,
+                            citations_json  TEXT    NOT NULL,
+                            evaluation_json TEXT    NOT NULL,
+                            passed_eval     INTEGER NOT NULL DEFAULT 0,
+                            model_id        TEXT    NOT NULL,
+                            generated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_job_summaries_job_id ON job_summaries(job_id);
+                        CREATE INDEX IF NOT EXISTS idx_job_summaries_passed_eval ON job_summaries(passed_eval);
+                        """
+                    )
+            except sqlite3.OperationalError:
+                pass  # table already exists
 
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -676,3 +713,69 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute(sql, params)
             return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
+
+    def get_reranked_with_full_text(self, limit: int) -> list[tuple]:
+        """Fetch reranked jobs with full text data for generation.
+
+        Joins reranked scores with job and extraction details. LEFT JOIN on
+        job_extractions is defensive against missing extraction records.
+
+        Args:
+            limit: Maximum number of results to return
+
+        Returns:
+            List of tuples: (job_id, rank, score, title, company, location,
+                            absolute_url, cleaned_description, responsibilities,
+                            skills, tools_and_platforms, experience_min_years)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT r.job_id, r.rank, r.score,
+                       j.title, j.company, j.location, j.absolute_url, j.cleaned_description,
+                       e.responsibilities, e.skills, e.tools_and_platforms, e.experience_min_years
+                FROM job_reranked r
+                JOIN jobs j ON j.id = r.job_id
+                LEFT JOIN job_extractions e ON e.job_id = r.job_id
+                ORDER BY r.rank ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return cursor.fetchall()
+
+    def insert_summaries(self, summaries: list[dict]) -> None:
+        """Replace all job_summaries rows with new results (DELETE + INSERT).
+
+        Idempotent: deletes all rows then inserts new batch in one transaction.
+
+        Args:
+            summaries: List of dicts with keys: job_id, rank, summary, citations_json,
+                      evaluation_json, passed_eval, model_id
+        """
+        if not summaries:
+            return
+
+        rows = [
+            (
+                s["job_id"],
+                s["rank"],
+                s["summary"],
+                s["citations_json"],
+                s["evaluation_json"],
+                s["passed_eval"],
+                s["model_id"],
+            )
+            for s in summaries
+        ]
+
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM job_summaries")
+            conn.executemany(
+                """
+                INSERT INTO job_summaries
+                    (job_id, rank, summary, citations_json, evaluation_json, passed_eval, model_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )

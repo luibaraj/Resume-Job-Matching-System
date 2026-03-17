@@ -97,6 +97,17 @@ class Config:
         default_factory=lambda: int(os.environ.get("RERANKING_BATCH_SIZE", "8"))
     )
 
+    # Generation
+    generation_model_id: str = field(
+        default_factory=lambda: os.environ.get("GENERATION_MODEL_ID", "gemini-2.5-flash")
+    )
+    generation_top_k: int = field(
+        default_factory=lambda: int(os.environ.get("GENERATION_TOP_K", "10"))
+    )
+    generation_max_retries: int = field(
+        default_factory=lambda: int(os.environ.get("GENERATION_MAX_RETRIES", "2"))
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
@@ -140,4 +151,8 @@ def load_config() -> Config:
         raise ValueError("RERANKING_TOP_K must be >= 1")
     if config.reranking_batch_size < 1:
         raise ValueError("RERANKING_BATCH_SIZE must be >= 1")
+    if config.generation_top_k < 1:
+        raise ValueError("GENERATION_TOP_K must be >= 1")
+    if config.generation_max_retries < 0:
+        raise ValueError("GENERATION_MAX_RETRIES must be >= 0")
     return config
