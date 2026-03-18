@@ -196,82 +196,12 @@ class TestDockerComposeMain:
             assert service.get("restart") == "no"
 
 
-class TestDockerComposeAirflow:
-    """Tests for docker/docker-compose.airflow.yml."""
-
-    def test_file_exists(self):
-        """docker-compose.airflow.yml exists."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        assert compose_file.is_file()
-
-    def test_parses_as_valid_yaml(self):
-        """File parses as valid YAML."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = compose_file.read_text()
-        yaml.safe_load(content)  # Will raise if invalid
-
-    def test_airflow_service_exists(self):
-        """airflow service is defined."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        assert "airflow" in content["services"]
-
-    def test_uses_apache_airflow_image(self):
-        """airflow service uses custom airflow image from GHCR."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        airflow = content["services"]["airflow"]
-        image = airflow.get("image", "")
-        assert image.startswith("ghcr.io/") and "airflow" in image
-
-    def test_docker_sock_volume_mounted(self):
-        """Docker socket is mounted for DinD."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        airflow = content["services"]["airflow"]
-        volumes = airflow.get("volumes", [])
-        assert any("/var/run/docker.sock" in str(v) for v in volumes)
-
-    def test_port_8080_exposed(self):
-        """Port 8080 is exposed."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        airflow = content["services"]["airflow"]
-        ports = airflow.get("ports", [])
-        assert any("8080" in str(p) for p in ports)
-
-    def test_dags_folder_volume_mounted(self):
-        """DAGs folder is mounted into container."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        airflow = content["services"]["airflow"]
-        volumes = airflow.get("volumes", [])
-        # Look for ../airflow:/opt/airflow/dags or similar
-        assert any("airflow" in str(v) and "/opt/airflow/dags" in str(v) for v in volumes)
-
-    def test_airflow_home_volume_defined(self):
-        """airflow_home volume is defined at top level."""
-        compose_file = PROJECT_ROOT / "docker" / "docker-compose.airflow.yml"
-        content = yaml.safe_load(compose_file.read_text())
-        assert "airflow_home" in content.get("volumes", {})
-
-
 class TestProjectFiles:
     """Tests for required project files."""
-
-    def test_dag_file_exists(self):
-        """airflow/dag.py exists."""
-        dag_file = PROJECT_ROOT / "airflow" / "dag.py"
-        assert dag_file.is_file()
 
     def test_requirements_txt_exists(self):
         """requirements.txt exists."""
         req_file = PROJECT_ROOT / "requirements.txt"
-        assert req_file.is_file()
-
-    def test_requirements_airflow_txt_exists(self):
-        """requirements-airflow.txt exists."""
-        req_file = PROJECT_ROOT / "requirements-airflow.txt"
         assert req_file.is_file()
 
     def test_requirements_contains_requests(self):
@@ -297,18 +227,6 @@ class TestProjectFiles:
         req_file = PROJECT_ROOT / "requirements.txt"
         content = req_file.read_text()
         assert "pytest-mock" in content
-
-    def test_requirements_airflow_contains_apache_airflow(self):
-        """requirements-airflow.txt includes apache-airflow."""
-        req_file = PROJECT_ROOT / "requirements-airflow.txt"
-        content = req_file.read_text()
-        assert "apache-airflow" in content
-
-    def test_requirements_airflow_contains_docker_provider(self):
-        """requirements-airflow.txt includes docker provider."""
-        req_file = PROJECT_ROOT / "requirements-airflow.txt"
-        content = req_file.read_text()
-        assert "apache-airflow-providers-docker" in content
 
     def test_env_example_exists(self):
         """.env.example exists."""
