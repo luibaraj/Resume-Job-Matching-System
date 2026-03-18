@@ -26,6 +26,7 @@ from src.generation import (
     _run_evaluator,
     _process_single_job,
     generate_summaries,
+    write_results_to_file,
 )
 
 
@@ -594,7 +595,7 @@ Final text [R:ref5] and [J:ref6].
 
 
 class TestRunEvaluator:
-    """Integration tests for _run_evaluator with mocked Gemini client."""
+    """Integration tests for _run_evaluator with mocked OpenAI client."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -626,67 +627,107 @@ Final text [R:ref5] and [J:ref6].
 """
         self.logger = logging.getLogger("test")
 
+    def _make_openai_response(self, content: str):
+        """Build a mock OpenAI chat completion response."""
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = content
+        return response
+
     def test_evaluator_returns_dict(self):
         """Test evaluator returning valid evaluation dict."""
-        client = MagicMock()
-        response_mock = MagicMock()
-        response_mock.text = json.dumps({
-            "faithfulness": {
-                "score": 9,
-                "justification": "All claims are grounded.",
-                "flags": []
-            },
-            "completeness": {
-                "score": 10,
-                "justification": "Three distinct similarities."
-            },
-            "structural_adherence": {
-                "score": 10,
-                "justification": "Perfect format.",
-                "issues": []
-            },
-            "overall_pass": True
-        })
-        client.models.generate_content.return_value = response_mock
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = self._make_openai_response(
+            json.dumps({
+                "faithfulness": {
+                    "score": 9,
+                    "justification": "All claims are grounded.",
+                    "flags": []
+                },
+                "completeness": {
+                    "score": 10,
+                    "justification": "Three distinct similarities."
+                },
+                "structural_adherence": {
+                    "score": 10,
+                    "justification": "Perfect format.",
+                    "issues": []
+                },
+                "overall_pass": True
+            })
+        )
 
         result = _run_evaluator(
             self.job, self.resume_text, self.summary,
-            client, "gemini-2.5-flash", self.logger
+            openai_client, "gpt-4o-mini", self.logger
         )
 
         assert result is not None
         assert result["overall_pass"] is True
         assert result["faithfulness"]["score"] == 9
 
+    def test_evaluator_uses_openai_not_gemini(self):
+        """Test evaluator calls openai_client.chat.completions.create, not Gemini."""
+        openai_client = MagicMock()
+        gemini_client = MagicMock()
+        openai_client.chat.completions.create.return_value = self._make_openai_response(
+            json.dumps({
+                "faithfulness": {"score": 8, "justification": "Good.", "flags": []},
+                "completeness": {"score": 8, "justification": "OK."},
+                "structural_adherence": {"score": 8, "justification": "Fine.", "issues": []},
+                "overall_pass": True,
+            })
+        )
+
+        _run_evaluator(
+            self.job, self.resume_text, self.summary,
+            openai_client, "gpt-4o-mini", self.logger
+        )
+
+        openai_client.chat.completions.create.assert_called_once()
+        gemini_client.models.generate_content.assert_not_called()
+
     def test_evaluator_json_error(self):
         """Test evaluator handling invalid JSON."""
-        client = MagicMock()
-        response_mock = MagicMock()
-        response_mock.text = "Invalid JSON{{"
-        client.models.generate_content.return_value = response_mock
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = self._make_openai_response(
+            "Invalid JSON{{"
+        )
 
         result = _run_evaluator(
             self.job, self.resume_text, self.summary,
-            client, "gemini-2.5-flash", self.logger
+            openai_client, "gpt-4o-mini", self.logger
         )
 
         assert result is None
 
     def test_evaluator_schema_error(self):
         """Test evaluator handling schema validation error."""
-        client = MagicMock()
-        response_mock = MagicMock()
-        response_mock.text = json.dumps({
-            "faithfulness": {"score": "invalid"},
-            "completeness": {"score": 8},
-            "structural_adherence": {"score": 9, "issues": []},
-            "overall_pass": True
-        })
-        client.models.generate_content.return_value = response_mock
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = self._make_openai_response(
+            json.dumps({
+                "faithfulness": {"score": "invalid"},
+                "completeness": {"score": 8},
+                "structural_adherence": {"score": 9, "issues": []},
+                "overall_pass": True,
+            })
+        )
 
         result = _run_evaluator(
             self.job, self.resume_text, self.summary,
-            client, "gemini-2.5-flash", self.logger
+            openai_client, "gpt-4o-mini", self.logger
+        )
+
+        assert result is None
+
+    def test_evaluator_api_error(self):
+        """Test evaluator handling API exception."""
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.side_effect = Exception("API error")
+
+        result = _run_evaluator(
+            self.job, self.resume_text, self.summary,
+            openai_client, "gpt-4o-mini", self.logger
         )
 
         assert result is None
@@ -714,9 +755,16 @@ class TestProcessSingleJob:
         self.resume_text = "I built ML systems. 7 years experience."
         self.logger = logging.getLogger("test")
 
+    def _make_openai_response(self, content: str):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = content
+        return response
+
     def test_process_single_job_success(self):
         """Test successful processing through all stages."""
-        client = MagicMock()
+        gemini_client = MagicMock()
+        openai_client = MagicMock()
 
         # CoN response (relevant)
         con_response = MagicMock()
@@ -741,19 +789,21 @@ More text [R:ref3] and [J:ref4].
 Final text [R:ref5] and [J:ref6].
 """
 
-        # Evaluation response (pass)
-        eval_response = MagicMock()
-        eval_response.text = json.dumps({
-            "faithfulness": {"score": 9, "justification": "Good.", "flags": []},
-            "completeness": {"score": 10, "justification": "Three similarities."},
-            "structural_adherence": {"score": 10, "justification": "Valid.", "issues": []},
-            "overall_pass": True
-        })
+        gemini_client.models.generate_content.side_effect = [con_response, gen_response]
 
-        client.models.generate_content.side_effect = [con_response, gen_response, eval_response]
+        # Evaluation response via OpenAI
+        openai_client.chat.completions.create.return_value = self._make_openai_response(
+            json.dumps({
+                "faithfulness": {"score": 9, "justification": "Good.", "flags": []},
+                "completeness": {"score": 10, "justification": "Three similarities."},
+                "structural_adherence": {"score": 10, "justification": "Valid.", "issues": []},
+                "overall_pass": True
+            })
+        )
 
         result = _process_single_job(
-            self.job, self.resume_text, client, "gemini-2.5-flash", 2, self.logger
+            self.job, self.resume_text, gemini_client, "gemini-2.5-flash",
+            openai_client, "gpt-4o-mini", 2, self.logger
         )
 
         assert result is not None
@@ -765,7 +815,8 @@ Final text [R:ref5] and [J:ref6].
 
     def test_process_single_job_dropped_by_con_filter(self):
         """Test job dropped by CoN filter (irrelevant)."""
-        client = MagicMock()
+        gemini_client = MagicMock()
+        openai_client = MagicMock()
         con_response = MagicMock()
         con_response.text = json.dumps({
             "relevance_verdict": "irrelevant",
@@ -773,17 +824,19 @@ Final text [R:ref5] and [J:ref6].
             "contradictions": [],
             "strong_alignments": []
         })
-        client.models.generate_content.return_value = con_response
+        gemini_client.models.generate_content.return_value = con_response
 
         result = _process_single_job(
-            self.job, self.resume_text, client, "gemini-2.5-flash", 2, self.logger
+            self.job, self.resume_text, gemini_client, "gemini-2.5-flash",
+            openai_client, "gpt-4o-mini", 2, self.logger
         )
 
         assert result is None
 
     def test_process_single_job_generation_fails(self):
         """Test job dropped when generation fails."""
-        client = MagicMock()
+        gemini_client = MagicMock()
+        openai_client = MagicMock()
 
         # CoN response (relevant)
         con_response = MagicMock()
@@ -798,17 +851,19 @@ Final text [R:ref5] and [J:ref6].
         gen_response = MagicMock()
         gen_response.text = "Invalid summary without structure"
 
-        client.models.generate_content.side_effect = [con_response, gen_response, gen_response]
+        gemini_client.models.generate_content.side_effect = [con_response, gen_response, gen_response]
 
         result = _process_single_job(
-            self.job, self.resume_text, client, "gemini-2.5-flash", 2, self.logger
+            self.job, self.resume_text, gemini_client, "gemini-2.5-flash",
+            openai_client, "gpt-4o-mini", 2, self.logger
         )
 
         assert result is None
 
     def test_process_single_job_evaluator_fails_still_writes(self):
         """Test job written despite evaluator failure."""
-        client = MagicMock()
+        gemini_client = MagicMock()
+        openai_client = MagicMock()
 
         # CoN response (relevant)
         con_response = MagicMock()
@@ -833,11 +888,14 @@ More text [R:ref3] and [J:ref4].
 Final text [R:ref5] and [J:ref6].
 """
 
-        # Evaluator raises exception
-        client.models.generate_content.side_effect = [con_response, gen_response, Exception("API error")]
+        gemini_client.models.generate_content.side_effect = [con_response, gen_response]
+
+        # OpenAI evaluator raises exception
+        openai_client.chat.completions.create.side_effect = Exception("API error")
 
         result = _process_single_job(
-            self.job, self.resume_text, client, "gemini-2.5-flash", 2, self.logger
+            self.job, self.resume_text, gemini_client, "gemini-2.5-flash",
+            openai_client, "gpt-4o-mini", 2, self.logger
         )
 
         assert result is not None
@@ -848,8 +906,14 @@ Final text [R:ref5] and [J:ref6].
 class TestGenerateSummaries:
     """Integration tests for generate_summaries main function."""
 
+    def _make_openai_response(self, content: str):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = content
+        return response
+
     def test_generate_summaries_end_to_end(self):
-        """Test end-to-end generation with mocked DB and Gemini."""
+        """Test end-to-end generation with mocked DB, Gemini, and OpenAI."""
         # Mock DB
         db = MagicMock()
         db.get_reranked_with_full_text.return_value = [
@@ -860,31 +924,33 @@ class TestGenerateSummaries:
         # Mock config
         config = MagicMock()
         config.google_api_key = "test_key"
+        config.openai_api_key = "test_openai_key"
         config.retrieval_user_profile_path = "test_profile.txt"
         config.generation_model_id = "gemini-2.5-flash"
+        config.generation_eval_model_id = "gpt-4o-mini"
         config.generation_top_k = 10
         config.generation_max_retries = 2
 
-        # Mock resume file
         resume_text = "I have ML experience."
 
-        # Mock Gemini client
         with patch("src.retrieval.load_user_profile", return_value=resume_text):
-            with patch("src.generation.genai.Client") as mock_client_class:
-                client = MagicMock()
-                mock_client_class.return_value = client
+            with patch("src.generation.genai.Client") as mock_gemini_class:
+                with patch("src.generation.OpenAI") as mock_openai_class:
+                    gemini_client = MagicMock()
+                    mock_gemini_class.return_value = gemini_client
+                    openai_client = MagicMock()
+                    mock_openai_class.return_value = openai_client
 
-                # Setup API responses
-                con_response = MagicMock()
-                con_response.text = json.dumps({
-                    "relevance_verdict": "relevant",
-                    "relevance_reasoning": "Good match.",
-                    "contradictions": [],
-                    "strong_alignments": ["ML expertise"]
-                })
-
-                gen_response = MagicMock()
-                gen_response.text = """<thinking>Great alignment.</thinking>
+                    # Gemini: CoN + generation
+                    con_response = MagicMock()
+                    con_response.text = json.dumps({
+                        "relevance_verdict": "relevant",
+                        "relevance_reasoning": "Good match.",
+                        "contradictions": [],
+                        "strong_alignments": ["ML expertise"]
+                    })
+                    gen_response = MagicMock()
+                    gen_response.text = """<thinking>Great alignment.</thinking>
 
 **Similarity 1 — Test**
 Text [R:ref1] and [J:ref2].
@@ -895,22 +961,23 @@ More text [R:ref3] and [J:ref4].
 **Similarity 3 — Test**
 Final text [R:ref5] and [J:ref6].
 """
+                    gemini_client.models.generate_content.side_effect = [con_response, gen_response]
 
-                eval_response = MagicMock()
-                eval_response.text = json.dumps({
-                    "faithfulness": {"score": 9, "justification": "Good.", "flags": []},
-                    "completeness": {"score": 10, "justification": "Three."},
-                    "structural_adherence": {"score": 10, "justification": "Valid.", "issues": []},
-                    "overall_pass": True
-                })
+                    # OpenAI: evaluation
+                    openai_client.chat.completions.create.return_value = self._make_openai_response(
+                        json.dumps({
+                            "faithfulness": {"score": 9, "justification": "Good.", "flags": []},
+                            "completeness": {"score": 10, "justification": "Three."},
+                            "structural_adherence": {"score": 10, "justification": "Valid.", "issues": []},
+                            "overall_pass": True
+                        })
+                    )
 
-                client.models.generate_content.side_effect = [con_response, gen_response, eval_response]
+                    processed, dropped = generate_summaries(db, config)
 
-                processed, dropped = generate_summaries(db, config)
-
-                assert processed == 1
-                assert dropped == 0
-                db.insert_summaries.assert_called_once()
+                    assert processed == 1
+                    assert dropped == 0
+                    db.insert_summaries.assert_called_once()
 
     def test_generate_summaries_empty_db(self):
         """Test generate_summaries with no reranked jobs."""
@@ -919,18 +986,21 @@ Final text [R:ref5] and [J:ref6].
 
         config = MagicMock()
         config.google_api_key = "test_key"
+        config.openai_api_key = "test_openai_key"
         config.retrieval_user_profile_path = "test_profile.txt"
         config.generation_model_id = "gemini-2.5-flash"
+        config.generation_eval_model_id = "gpt-4o-mini"
         config.generation_top_k = 10
         config.generation_max_retries = 2
 
         with patch("src.retrieval.load_user_profile", return_value="resume"):
             with patch("src.generation.genai.Client"):
-                processed, dropped = generate_summaries(db, config)
+                with patch("src.generation.OpenAI"):
+                    processed, dropped = generate_summaries(db, config)
 
-                assert processed == 0
-                assert dropped == 0
-                db.insert_summaries.assert_not_called()
+                    assert processed == 0
+                    assert dropped == 0
+                    db.insert_summaries.assert_not_called()
 
     def test_generate_summaries_all_dropped(self):
         """Test generate_summaries with all jobs dropped."""
@@ -944,17 +1014,20 @@ Final text [R:ref5] and [J:ref6].
 
         config = MagicMock()
         config.google_api_key = "test_key"
+        config.openai_api_key = "test_openai_key"
         config.retrieval_user_profile_path = "test_profile.txt"
         config.generation_model_id = "gemini-2.5-flash"
+        config.generation_eval_model_id = "gpt-4o-mini"
         config.generation_top_k = 10
         config.generation_max_retries = 2
 
         with patch("src.retrieval.load_user_profile", return_value="resume"):
-            with patch("src.generation.genai.Client") as mock_client_class:
-                    client = MagicMock()
-                    mock_client_class.return_value = client
+            with patch("src.generation.genai.Client") as mock_gemini_class:
+                with patch("src.generation.OpenAI"):
+                    gemini_client = MagicMock()
+                    mock_gemini_class.return_value = gemini_client
 
-                    # All jobs marked as irrelevant
+                    # All jobs marked as irrelevant by CoN filter
                     con_response = MagicMock()
                     con_response.text = json.dumps({
                         "relevance_verdict": "irrelevant",
@@ -962,10 +1035,76 @@ Final text [R:ref5] and [J:ref6].
                         "contradictions": [],
                         "strong_alignments": []
                     })
-                    client.models.generate_content.return_value = con_response
+                    gemini_client.models.generate_content.return_value = con_response
 
                     processed, dropped = generate_summaries(db, config)
 
                     assert processed == 0
                     assert dropped == 2
                     db.insert_summaries.assert_not_called()
+
+
+class TestWriteResultsToFile:
+    """Tests for write_results_to_file helper."""
+
+    def setup_method(self):
+        self.logger = logging.getLogger("test")
+
+    def _make_db_rows(self):
+        return [
+            (1, "ML Engineer", "Acme", "https://example.com/1", 0.95,
+             "<thinking>Good.</thinking>\n\n**Similarity 1**\nText [R:r1] and [J:j1].\n\n**Similarity 2**\nMore [R:r2] and [J:j2].\n\n**Similarity 3**\nFinal [R:r3] and [J:j3].",
+             json.dumps({"faithfulness": {"score": 9}, "completeness": {"score": 9}, "structural_adherence": {"score": 9}}),
+             1),
+        ]
+
+    def test_writes_file(self, tmp_path):
+        """Test that write_results_to_file creates a file with expected content."""
+        output_path = str(tmp_path / "result.txt")
+        db = MagicMock()
+        db.get_connection.return_value.__enter__ = MagicMock()
+        db.get_connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        conn_mock = MagicMock()
+        conn_mock.execute.return_value.fetchall.return_value = self._make_db_rows()
+        db.get_connection.return_value.__enter__.return_value = conn_mock
+
+        write_results_to_file(db, output_path, self.logger)
+
+        import os
+        assert os.path.exists(output_path)
+        content = open(output_path).read()
+        assert "Rank 1" in content
+        assert "ML Engineer" in content
+        assert "Acme" in content
+        assert "https://example.com/1" in content
+
+    def test_creates_directory_if_missing(self, tmp_path):
+        """Test that parent directory is created if it does not exist."""
+        output_path = str(tmp_path / "scratch" / "nested" / "result.txt")
+        db = MagicMock()
+        conn_mock = MagicMock()
+        conn_mock.execute.return_value.fetchall.return_value = self._make_db_rows()
+        db.get_connection.return_value.__enter__ = MagicMock(return_value=conn_mock)
+        db.get_connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        write_results_to_file(db, output_path, self.logger)
+
+        import os
+        assert os.path.exists(output_path)
+
+    def test_handles_empty_summaries(self, tmp_path):
+        """Test graceful output when no summaries exist."""
+        output_path = str(tmp_path / "result.txt")
+        db = MagicMock()
+        conn_mock = MagicMock()
+        conn_mock.execute.return_value.fetchall.return_value = []
+        db.get_connection.return_value.__enter__ = MagicMock(return_value=conn_mock)
+        db.get_connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        write_results_to_file(db, output_path, self.logger)
+
+        import os
+        assert os.path.exists(output_path)
+        content = open(output_path).read()
+        assert content == ""

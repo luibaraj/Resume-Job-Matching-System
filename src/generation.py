@@ -18,6 +18,7 @@ from typing import Optional
 
 import jsonschema
 from google import genai
+from openai import OpenAI
 
 from src.utils import setup_logging
 
@@ -468,12 +469,12 @@ def _run_evaluator(
     job: JobContext,
     resume_text: str,
     summary: str,
-    client,
-    model_id: str,
+    openai_client: OpenAI,
+    eval_model_id: str,
     logger: logging.Logger
 ) -> dict | None:
     """
-    Reference-free LLM judge for summary quality.
+    Reference-free LLM judge for summary quality using OpenAI.
 
     Returns evaluation dict or None on failure.
 
@@ -481,8 +482,8 @@ def _run_evaluator(
         job: JobContext with job details
         resume_text: candidate resume text
         summary: generated summary text
-        client: Gemini genai.Client instance
-        model_id: Gemini model ID
+        openai_client: OpenAI client instance
+        eval_model_id: OpenAI model ID (e.g. "gpt-4o-mini")
         logger: logger instance
 
     Returns:
@@ -523,18 +524,17 @@ Scoring:
 Return ONLY JSON. overall_pass must be a boolean."""
 
     try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=[
-                {"role": "user", "parts": [{"text": system_prompt + "\n\n" + user_prompt}]}
+        response = openai_client.chat.completions.create(
+            model=eval_model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
-            config=genai.types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=512,
-                response_mime_type="application/json",
-            ),
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            max_tokens=512,
         )
-        parsed = json.loads(response.text)
+        parsed = json.loads(response.choices[0].message.content)
         jsonschema.validate(parsed, EVAL_SCHEMA)
         return parsed
     except json.JSONDecodeError as e:
@@ -553,6 +553,8 @@ def _process_single_job(
     resume_text: str,
     client,
     model_id: str,
+    openai_client: OpenAI,
+    eval_model_id: str,
     max_retries: int,
     logger: logging.Logger
 ) -> GenerationResult | None:
@@ -572,6 +574,8 @@ def _process_single_job(
         resume_text: candidate resume text
         client: Gemini genai.Client instance
         model_id: Gemini model ID
+        openai_client: OpenAI client instance for evaluation
+        eval_model_id: OpenAI model ID for evaluation
         max_retries: max retries for generation
         logger: logger instance
 
@@ -600,7 +604,7 @@ def _process_single_job(
     logger.info("Job %d: generation succeeded", job.job_id)
 
     # Stage 3: Evaluation
-    evaluation = _run_evaluator(job, resume_text, summary_text, client, model_id, logger)
+    evaluation = _run_evaluator(job, resume_text, summary_text, openai_client, eval_model_id, logger)
     if evaluation is None:
         logger.warning("Job %d: evaluator API/schema error (still writing summary)", job.job_id)
         evaluation = {}
@@ -652,6 +656,10 @@ def generate_summaries(db, config) -> tuple[int, int]:
     client = genai.Client(api_key=config.google_api_key)
     logger.info("Initialized Gemini client with model %s", config.generation_model_id)
 
+    # Initialize OpenAI client for evaluation
+    openai_client = OpenAI(api_key=config.openai_api_key)
+    logger.info("Initialized OpenAI client with eval model %s", config.generation_eval_model_id)
+
     # Fetch reranked jobs with full text
     rows = db.get_reranked_with_full_text(config.generation_top_k)
     logger.info("Fetched %d reranked jobs for generation", len(rows))
@@ -679,6 +687,8 @@ def generate_summaries(db, config) -> tuple[int, int]:
             resume_text,
             client,
             config.generation_model_id,
+            openai_client,
+            config.generation_eval_model_id,
             config.generation_max_retries,
             logger,
         )
@@ -710,6 +720,63 @@ def generate_summaries(db, config) -> tuple[int, int]:
     return len(results), dropped_count
 
 
+
+
+def write_results_to_file(db, output_path: str, logger: logging.Logger) -> None:
+    """
+    Query job_summaries and write formatted results to a text file.
+
+    Joins job_summaries with jobs and job_reranked, ordered by rank.
+    Creates parent directory if it does not exist.
+
+    Args:
+        db: DatabaseManager instance
+        output_path: path to write the result file
+        logger: logger instance
+    """
+    import os
+
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.rank, j.title, j.company, j.absolute_url, r.score,
+                   s.summary, s.evaluation_json, s.passed_eval
+            FROM job_summaries s
+            JOIN jobs j ON j.id = s.job_id
+            JOIN job_reranked r ON r.job_id = s.job_id
+            ORDER BY s.rank ASC
+            """
+        ).fetchall()
+
+    lines = []
+    for row in rows:
+        rank, title, company, url, score, summary, eval_json, passed = row
+        try:
+            ev = json.loads(eval_json) if eval_json else {}
+        except json.JSONDecodeError:
+            ev = {}
+        faith = ev.get("faithfulness", {}).get("score", "N/A")
+        comp = ev.get("completeness", {}).get("score", "N/A")
+        struct = ev.get("structural_adherence", {}).get("score", "N/A")
+        lines.append(
+            f"Rank {rank} — {title} @ {company}\n"
+            f"URL: {url or 'N/A'}\n"
+            f"Score: {score:.4f}\n\n"
+            f"{summary}\n\n"
+            f"Evaluation: passed={bool(passed)} | faithfulness={faith} | "
+            f"completeness={comp} | structural_adherence={struct}\n"
+        )
+
+    with open(output_path, "w") as f:
+        f.write("\n---\n\n".join(lines))
+
+    logger.info("Wrote %d summaries to %s", len(lines), output_path)
+
+
 def main() -> None:
     """CLI entrypoint called by Docker container.
 
@@ -734,6 +801,7 @@ def main() -> None:
         run_id = db.create_pipeline_run(run_date, "generation")
 
         processed, skipped = generate_summaries(db, config)
+        write_results_to_file(db, config.generation_result_path, logger)
         db.finish_pipeline_run(run_id, "success", jobs_processed=processed, jobs_skipped=skipped)
         logger.info("Generation step completed: %d summaries written", processed)
 

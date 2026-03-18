@@ -13,7 +13,7 @@ import pytest
 # Skip entire file if airflow is not installed
 airflow = pytest.importorskip("airflow", reason="apache-airflow not installed")
 
-from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 
 @pytest.fixture(scope="module")
@@ -67,9 +67,9 @@ class TestDagStructure:
         """preprocess_jobs task exists."""
         assert "preprocess_jobs" in loaded_dag.task_ids
 
-    def test_task_count_is_four(self, loaded_dag):
-        """DAG has exactly 4 tasks."""
-        assert len(loaded_dag.tasks) == 4
+    def test_task_count_is_nine(self, loaded_dag):
+        """DAG has exactly 9 tasks."""
+        assert len(loaded_dag.tasks) == 9
 
     def test_has_filter_roles_task(self, loaded_dag):
         """filter_roles task exists."""
@@ -79,19 +79,46 @@ class TestDagStructure:
         """extract_jobs task exists."""
         assert "extract_jobs" in loaded_dag.task_ids
 
+    def test_has_embed_jobs_task(self, loaded_dag):
+        """embed_jobs task exists."""
+        assert "embed_jobs" in loaded_dag.task_ids
+
+    def test_has_retrieve_jobs_task(self, loaded_dag):
+        """retrieve_jobs task exists."""
+        assert "retrieve_jobs" in loaded_dag.task_ids
+
+    def test_has_rerank_jobs_task(self, loaded_dag):
+        """rerank_jobs task exists."""
+        assert "rerank_jobs" in loaded_dag.task_ids
+
+    def test_has_generate_summaries_task(self, loaded_dag):
+        """generate_summaries task exists."""
+        assert "generate_summaries" in loaded_dag.task_ids
+
+    def test_has_evaluate_task(self, loaded_dag):
+        """evaluate task exists."""
+        assert "evaluate" in loaded_dag.task_ids
+
 
 class TestDagTaskTypes:
     """Tests for task types."""
 
-    def test_collect_jobs_is_docker_operator(self, loaded_dag):
-        """collect_jobs is a DockerOperator."""
-        task = loaded_dag.get_task("collect_jobs")
-        assert isinstance(task, DockerOperator)
+    def test_all_tasks_are_python_operators(self, loaded_dag):
+        """All tasks are PythonOperator instances."""
+        for task in loaded_dag.tasks:
+            assert isinstance(task, PythonOperator), (
+                f"Task '{task.task_id}' is {type(task).__name__}, expected PythonOperator"
+            )
 
-    def test_preprocess_jobs_is_docker_operator(self, loaded_dag):
-        """preprocess_jobs is a DockerOperator."""
+    def test_collect_jobs_is_python_operator(self, loaded_dag):
+        """collect_jobs is a PythonOperator."""
+        task = loaded_dag.get_task("collect_jobs")
+        assert isinstance(task, PythonOperator)
+
+    def test_preprocess_jobs_is_python_operator(self, loaded_dag):
+        """preprocess_jobs is a PythonOperator."""
         task = loaded_dag.get_task("preprocess_jobs")
-        assert isinstance(task, DockerOperator)
+        assert isinstance(task, PythonOperator)
 
 
 class TestDagTaskDependency:
@@ -117,10 +144,35 @@ class TestDagTaskDependency:
         filter_task = loaded_dag.get_task("filter_roles")
         assert "extract_jobs" in filter_task.downstream_task_ids
 
-    def test_extract_has_no_downstream(self, loaded_dag):
-        """extract_jobs has no downstream tasks."""
+    def test_extract_downstream_is_embed(self, loaded_dag):
+        """extract_jobs is upstream of embed_jobs."""
         extract_task = loaded_dag.get_task("extract_jobs")
-        assert len(extract_task.downstream_task_ids) == 0
+        assert "embed_jobs" in extract_task.downstream_task_ids
+
+    def test_embed_downstream_is_retrieve(self, loaded_dag):
+        """embed_jobs is upstream of retrieve_jobs."""
+        embed_task = loaded_dag.get_task("embed_jobs")
+        assert "retrieve_jobs" in embed_task.downstream_task_ids
+
+    def test_retrieve_downstream_is_rerank(self, loaded_dag):
+        """retrieve_jobs is upstream of rerank_jobs."""
+        retrieve_task = loaded_dag.get_task("retrieve_jobs")
+        assert "rerank_jobs" in retrieve_task.downstream_task_ids
+
+    def test_rerank_downstream_is_generate(self, loaded_dag):
+        """rerank_jobs is upstream of generate_summaries."""
+        rerank_task = loaded_dag.get_task("rerank_jobs")
+        assert "generate_summaries" in rerank_task.downstream_task_ids
+
+    def test_generate_downstream_is_evaluate(self, loaded_dag):
+        """generate_summaries is upstream of evaluate."""
+        generate_task = loaded_dag.get_task("generate_summaries")
+        assert "evaluate" in generate_task.downstream_task_ids
+
+    def test_evaluate_has_no_downstream(self, loaded_dag):
+        """evaluate has no downstream tasks."""
+        evaluate_task = loaded_dag.get_task("evaluate")
+        assert len(evaluate_task.downstream_task_ids) == 0
 
 
 class TestDagDefaultArgs:
@@ -142,37 +194,3 @@ class TestDagDefaultArgs:
     def test_owner_is_pipeline(self, loaded_dag):
         """Owner is 'pipeline'."""
         assert loaded_dag.default_args["owner"] == "pipeline"
-
-
-class TestDagTaskConfig:
-    """Tests for task-level configuration."""
-
-    def test_collect_jobs_auto_remove_success(self, loaded_dag):
-        """collect_jobs auto_remove is 'success'."""
-        task = loaded_dag.get_task("collect_jobs")
-        assert task.auto_remove == "success"
-
-    def test_collect_jobs_network_mode_bridge(self, loaded_dag):
-        """collect_jobs network_mode is 'bridge'."""
-        task = loaded_dag.get_task("collect_jobs")
-        assert task.network_mode == "bridge"
-
-    def test_collect_jobs_docker_url(self, loaded_dag):
-        """collect_jobs docker_url points to Docker socket."""
-        task = loaded_dag.get_task("collect_jobs")
-        assert task.docker_url == "unix://var/run/docker.sock"
-
-    def test_preprocess_jobs_auto_remove_success(self, loaded_dag):
-        """preprocess_jobs auto_remove is 'success'."""
-        task = loaded_dag.get_task("preprocess_jobs")
-        assert task.auto_remove == "success"
-
-    def test_preprocess_jobs_network_mode_bridge(self, loaded_dag):
-        """preprocess_jobs network_mode is 'bridge'."""
-        task = loaded_dag.get_task("preprocess_jobs")
-        assert task.network_mode == "bridge"
-
-    def test_preprocess_jobs_docker_url(self, loaded_dag):
-        """preprocess_jobs docker_url points to Docker socket."""
-        task = loaded_dag.get_task("preprocess_jobs")
-        assert task.docker_url == "unix://var/run/docker.sock"

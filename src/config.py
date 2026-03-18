@@ -107,6 +107,12 @@ class Config:
     generation_max_retries: int = field(
         default_factory=lambda: int(os.environ.get("GENERATION_MAX_RETRIES", "2"))
     )
+    generation_eval_model_id: str = field(
+        default_factory=lambda: os.environ.get("GENERATION_EVAL_MODEL_ID", "gpt-4o-mini")
+    )
+    generation_result_path: str = field(
+        default_factory=lambda: os.environ.get("GENERATION_RESULT_PATH", "scratch/result.txt")
+    )
 
     # Evaluation
     openai_api_key: str = field(

@@ -269,3 +269,39 @@ class TestExtractionConfig:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="EXTRACTION_CHUNK_SIZE must be >= 1"):
             load_config()
+
+
+class TestGenerationConfig:
+    """Tests for generation config fields."""
+
+    def test_generation_eval_model_id_default(self, monkeypatch):
+        """generation_eval_model_id defaults to gpt-4o-mini."""
+        monkeypatch.delenv("GENERATION_EVAL_MODEL_ID", raising=False)
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        config = load_config()
+        assert config.generation_eval_model_id == "gpt-4o-mini"
+
+    def test_reads_generation_eval_model_id_from_env(self, monkeypatch):
+        """Reads GENERATION_EVAL_MODEL_ID from environment."""
+        monkeypatch.setenv("GENERATION_EVAL_MODEL_ID", "gpt-4o")
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        config = load_config()
+        assert config.generation_eval_model_id == "gpt-4o"
+
+    def test_generation_result_path_default(self, monkeypatch):
+        """generation_result_path defaults to scratch/result.txt."""
+        monkeypatch.delenv("GENERATION_RESULT_PATH", raising=False)
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        config = load_config()
+        assert config.generation_result_path == "scratch/result.txt"
+
+    def test_reads_generation_result_path_from_env(self, monkeypatch):
+        """Reads GENERATION_RESULT_PATH from environment."""
+        monkeypatch.setenv("GENERATION_RESULT_PATH", "/tmp/output/result.txt")
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        config = load_config()
+        assert config.generation_result_path == "/tmp/output/result.txt"
