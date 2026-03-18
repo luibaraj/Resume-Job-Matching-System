@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
 from src.database import DatabaseManager
 
@@ -31,6 +32,10 @@ PRECISION_AT_K = 20
 JUDGE_MAX_WORKERS = 5
 JUDGE_RETRY_ATTEMPTS = 3
 JUDGE_RETRY_DELAY = 2.0      # seconds
+
+# Step 4: Semantic drift check thresholds
+SEMANTIC_SIM_LOWER_BOUND = 0.35  # Reject if cosine similarity falls below this
+_ANTILEAK_EMBED_MODEL: SentenceTransformer | None = None
 
 
 @dataclass
@@ -229,27 +234,197 @@ def load_needles_from_json(path: str) -> list[EvalCase]:
     return cases
 
 
-def _build_golden_needle_prompt(resume_text: str) -> str:
+def extract_resume_features(
+    resume_text: str,
+    gemini_client,
+    model_id: str,
+    logger: logging.Logger,
+) -> dict:
     """
-    Returns the user prompt for Gemini.
-    Constraints to enforce (include these explicitly in the prompt):
-    - Write a realistic job posting (title, company name, full description with responsibilities and qualifications)
-    - DO NOT copy any sentence or phrase verbatim from the resume
-    - Use professional synonyms and paraphrasing throughout (prevents lexical leakage)
-    - Match the seniority level, domain, and key technical skills of the candidate
-    Response JSON schema: {\"title\": str, \"company\": str, \"description\": str}
-    """
-    return f"""You are a recruitment expert. Based on the resume below, create a realistic job posting that the candidate would be a strong match for.
+    Extract structured resume features to prevent lexical leakage.
 
-CRITICAL CONSTRAINTS:
-1. Write a COMPLETE job posting with title, company name, and full description.
-2. DO NOT copy any sentence or phrase verbatim from the resume.
-3. Use professional synonyms and paraphrasing throughout to prevent lexical leakage.
-4. Match the candidate's seniority level, domain, and key technical skills.
-5. The job description should include both responsibilities and required qualifications.
+    Instead of feeding raw resume into generation prompt, extract:
+    - hard_labels: non-negotiable technical terms (frameworks, tools, certifications)
+    - soft_labels: experiential descriptions that will be aggressively paraphrased
+    - seniority: inferred level (junior, mid, senior, staff, principal)
+    - domain: primary domain (ml-engineering, data-science, research, nlp, cv, rl, etc.)
+
+    Args:
+        resume_text: Raw resume content
+        gemini_client: google.genai.Client instance
+        model_id: Gemini model ID
+        logger: Logger instance
+
+    Returns:
+        dict with keys: hard_labels, soft_labels, seniority, domain
+
+    Raises:
+        ValueError: If extraction fails or JSON validation fails
+        RuntimeError: If max retries exhausted
+    """
+    prompt = f"""Extract the candidate's core profile into a structured JSON.
+
+Classify each item as:
+- "hard_labels": list of non-negotiable technical terms (frameworks, tools, platforms, certifications) that have no exact synonyms
+- "soft_labels": list of skills, responsibilities, or achievements described in prose (will be paraphrased)
+- "seniority": inferred level ("junior", "mid", "senior", "staff", "principal")
+- "domain": primary domain ("ml-engineering", "data-science", "research", "nlp", "cv", "rl", "etc.")
 
 Resume:
 {resume_text}
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{{"hard_labels": [...], "soft_labels": [...], "seniority": "...", "domain": "..."}}"""
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Extracting resume features (attempt {attempt + 1}/{max_retries})")
+            response = gemini_client.models.generate_content(
+                model=model_id,
+                contents=prompt,
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.3,  # Lower temperature for consistency
+                },
+            )
+            features = json.loads(response.text)
+
+            # Validate required keys
+            required_keys = {"hard_labels", "soft_labels", "seniority", "domain"}
+            if not required_keys.issubset(features.keys()):
+                raise ValueError(f"Missing required keys in extraction response: {features.keys()}")
+
+            # Validate list types
+            if not isinstance(features["hard_labels"], list):
+                raise ValueError(f"hard_labels must be a list, got {type(features['hard_labels'])}")
+            if not isinstance(features["soft_labels"], list):
+                raise ValueError(f"soft_labels must be a list, got {type(features['soft_labels'])}")
+            if not isinstance(features["seniority"], str):
+                raise ValueError(f"seniority must be a string, got {type(features['seniority'])}")
+            if not isinstance(features["domain"], str):
+                raise ValueError(f"domain must be a string, got {type(features['domain'])}")
+
+            logger.info(f"Features extracted: {len(features['hard_labels'])} hard labels, "
+                       f"{len(features['soft_labels'])} soft labels, "
+                       f"seniority={features['seniority']}, domain={features['domain']}")
+            return features
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"Feature extraction failed (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                raise RuntimeError(f"Failed to extract features after {max_retries} attempts: {e}")
+            time.sleep(2 ** attempt)  # exponential backoff
+        except Exception as e:
+            logger.error(f"Unexpected error extracting features: {e}")
+            if attempt == max_retries - 1:
+                raise RuntimeError(f"Failed to extract features after {max_retries} attempts: {e}")
+            time.sleep(2 ** attempt)
+
+    # Should not reach here, but safeguard
+    raise RuntimeError("Feature extraction exhausted retries")
+
+
+def build_forbidden_words(soft_labels: list[str], top_n: int = 20) -> list[str]:
+    """
+    Extract the top-N most frequent content words from soft labels.
+
+    Pure Python function (no LLM). Tokenizes soft labels, removes stopwords and short words,
+    and returns the most characteristic terms that should be quasi-paraphrased in the needle.
+
+    Args:
+        soft_labels: List of experiential descriptions (will be paraphrased)
+        top_n: Number of top words to extract (default 20)
+
+    Returns:
+        list[str] of forbidden words sorted by frequency (descending)
+    """
+    import re
+    from collections import Counter
+
+    # Common English stopwords to filter
+    stopwords = {
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+        "for", "from", "had", "has", "have", "he", "her", "hers", "him", "his",
+        "how", "i", "if", "in", "is", "it", "its", "me", "my", "myself",
+        "no", "nor", "not", "of", "on", "or", "our", "ours", "out", "over",
+        "own", "same", "she", "so", "some", "such", "than", "that", "the",
+        "their", "theirs", "them", "then", "there", "these", "they", "this",
+        "those", "to", "too", "under", "up", "very", "was", "we", "were",
+        "what", "when", "where", "which", "while", "who", "whom", "why",
+        "with", "you", "your", "yours", "yourself"
+    }
+
+    # Tokenize all soft labels
+    all_tokens = []
+    for label in soft_labels:
+        # Lowercase, split on non-alphanumeric
+        tokens = re.findall(r"\b\w+\b", label.lower())
+        all_tokens.extend(tokens)
+
+    # Filter: remove stopwords and very short words
+    filtered = [t for t in all_tokens if t not in stopwords and len(t) > 3]
+
+    # Count frequencies and extract top N
+    counter = Counter(filtered)
+    top_words = [word for word, count in counter.most_common(top_n)]
+
+    return top_words
+
+
+def _build_golden_needle_prompt(
+    features: dict,
+    forbidden_words: list[str],
+) -> str:
+    """
+    Build the golden needle generation prompt using extracted features (not raw resume).
+
+    Implements persona synthesis with negative constraints:
+    - Persona: hiring manager at AGI lab or biotech scale-up (occupational roles only)
+    - Hard labels: permitted verbatim in output
+    - Soft labels: quasi-paraphrased; forbidden words explicitly listed
+    - Length tolerance: ±35% of soft_labels word count
+
+    Args:
+        features: dict with hard_labels, soft_labels, seniority, domain
+        forbidden_words: list of words to avoid (will be quasi-paraphrased instead)
+
+    Returns:
+        Prompt string for Gemini
+    """
+    hard_labels = features.get("hard_labels", [])
+    soft_labels = features.get("soft_labels", [])
+    seniority = features.get("seniority", "mid")
+    domain = features.get("domain", "ml-engineering")
+
+    # Estimate word count bounds for soft labels
+    soft_word_count = sum(len(label.split()) for label in soft_labels)
+    min_words = int(soft_word_count * 0.65)
+    max_words = int(soft_word_count * 1.35)
+
+    hard_labels_str = ", ".join(hard_labels) if hard_labels else "(none)"
+    forbidden_str = ", ".join(forbidden_words) if forbidden_words else "(none)"
+
+    features_json = json.dumps({
+        "seniority": seniority,
+        "domain": domain,
+        "hard_labels": hard_labels,
+        "soft_labels": soft_labels,
+    }, indent=2)
+
+    return f"""You are a hiring manager at a fast-growing AI lab or biotech scale-up, writing a job posting.
+
+Candidate profile (JSON):
+{features_json}
+
+RULES:
+1. Write a COMPLETE job posting: title, company name, full description.
+2. You MUST include these technical terms verbatim (hard labels): {hard_labels_str}
+3. FORBIDDEN words (do not use these exact terms): {forbidden_str}
+   — Quasi-paraphrase these concepts using professional synonyms.
+4. Do NOT use sociodemographic attributes. Occupational roles only.
+5. Description length: between {min_words} and {max_words} words.
+6. Do NOT copy verbatim phrases from the candidate profile.
 
 Respond with ONLY valid JSON (no markdown, no explanation):
 {{"title": "...", "company": "...", "description": "..."}}"""
@@ -290,6 +465,49 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 {{"title": "...", "company": "...", "description": "...", "deal_breaker": "..."}}"""
 
 
+def _get_antileak_embed_model() -> SentenceTransformer:
+    """
+    Lazy-load the sentence transformer model for semantic drift checking.
+    Uses a module-level singleton to avoid reloading on every call.
+    """
+    global _ANTILEAK_EMBED_MODEL
+    if _ANTILEAK_EMBED_MODEL is None:
+        _ANTILEAK_EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return _ANTILEAK_EMBED_MODEL
+
+
+def passes_semantic_check(
+    resume_text: str,
+    needle_description: str,
+    logger: logging.Logger,
+) -> tuple[bool, float]:
+    """
+    Ensure the heavily obfuscated needle still semantically represents the candidate.
+
+    Uses local cosine similarity on sentence embeddings (all-MiniLM-L6-v2).
+    Rejects if cosine_sim < SEMANTIC_SIM_LOWER_BOUND (0.35 by default).
+
+    Args:
+        resume_text: Original resume text
+        needle_description: Generated job posting description
+        logger: Logger instance
+
+    Returns:
+        tuple[bool, float]: (passed, cosine_similarity_score)
+    """
+    try:
+        model = _get_antileak_embed_model()
+        embs = model.encode([resume_text, needle_description], normalize_embeddings=True)
+        cosine_sim = float(np.dot(embs[0], embs[1]))
+        passed = cosine_sim >= SEMANTIC_SIM_LOWER_BOUND
+        logger.info(f"Semantic check: cosine_sim={cosine_sim:.4f}, passed={passed}")
+        return passed, cosine_sim
+    except Exception as e:
+        logger.error(f"Semantic check failed with exception: {e}")
+        # Fail open: if embedding fails, reject the needle
+        return False, 0.0
+
+
 def generate_needles(
     resume_text: str,
     resume_id: str,
@@ -299,23 +517,43 @@ def generate_needles(
     max_retries: int = 3,
 ) -> EvalCase:
     """
-    1. Call Gemini with _build_golden_needle_prompt; response_mime_type="application/json"; temperature=0.7
-    2. Validate JSON has keys: title, company, description (raise ValueError if not)
-    3. Construct golden SyntheticNeedle (needle_id=GOLDEN_NEEDLE_ID, true_relevance=5)
-    4. Call Gemini with _build_adversarial_needle_prompt
-    5. Validate JSON has keys: title, company, description, deal_breaker
+    1. Extract resume features (hard/soft labels, seniority, domain) to prevent lexical leakage
+    2. Build forbidden word list from soft labels
+    3. For each golden needle retry:
+       a. Call Gemini with _build_golden_needle_prompt (uses features + forbidden words, not raw resume)
+       b. Validate JSON has keys: title, company, description
+       c. Check semantic similarity (cosine_sim >= 0.35) to ensure needle represents candidate
+       d. If both checks pass, construct golden SyntheticNeedle and break; else retry
+    4. Generate adversarial needle from golden needle and resume
+    5. Validate adversarial JSON has keys: title, company, description, deal_breaker
     6. Construct adversarial SyntheticNeedle (needle_id=ADVERSARIAL_NEEDLE_ID, true_relevance=0)
     7. Return EvalCase
+
     Retry each step up to max_retries with exponential backoff on API error or validation failure.
     """
+    # Step 1: Extract resume features (air-gapping)
+    logger.info(f"Extracting resume features for {resume_id}")
+    try:
+        features = extract_resume_features(resume_text, gemini_client, model_id, logger)
+    except RuntimeError as e:
+        logger.error(f"Failed to extract resume features: {e}")
+        raise
+
+    # Step 2: Build forbidden word list from soft labels
+    forbidden_words = build_forbidden_words(features["soft_labels"], top_n=20)
+    logger.info(f"Forbidden words: {forbidden_words}")
+
     # Generate golden needle
     golden = None
+    logger.info(f"Extracted features: hard_labels={features['hard_labels']}, "
+               f"soft_labels={features['soft_labels']}, "
+               f"seniority={features['seniority']}, domain={features['domain']}")
     for attempt in range(max_retries):
         try:
             logger.info(f"Generating golden needle for {resume_id} (attempt {attempt + 1}/{max_retries})")
             response = gemini_client.models.generate_content(
                 model=model_id,
-                contents=_build_golden_needle_prompt(resume_text),
+                contents=_build_golden_needle_prompt(features, forbidden_words),
                 generation_config={
                     "response_mime_type": "application/json",
                     "temperature": 0.7,
@@ -326,6 +564,16 @@ def generate_needles(
             # Validate required keys
             if not all(k in golden_data for k in ["title", "company", "description"]):
                 raise ValueError(f"Missing required keys in golden needle response: {golden_data.keys()}")
+
+            # Step 4: Check semantic similarity to ensure needle still represents the candidate
+            semantic_passed, cosine_sim = passes_semantic_check(
+                resume_text, golden_data["description"], logger
+            )
+            if not semantic_passed:
+                raise ValueError(
+                    f"Semantic check failed: cosine_sim={cosine_sim:.4f} < "
+                    f"{SEMANTIC_SIM_LOWER_BOUND}. Needle does not adequately represent candidate."
+                )
 
             golden = SyntheticNeedle(
                 needle_id=GOLDEN_NEEDLE_ID,

@@ -27,6 +27,7 @@ from src.evaluation import (
     _build_golden_needle_prompt,
     _build_adversarial_needle_prompt,
     generate_needles,
+    passes_semantic_check,
     run_retrieval_with_needles,
     run_retrieval_phase,
     _judge_single_item,
@@ -335,7 +336,9 @@ class TestTask4PromptEnforcesLinguisticDistance:
         """Call _build_golden_needle_prompt, assert it contains 'verbatim' or 'paraphrase'."""
         from src.evaluation import _build_golden_needle_prompt
 
-        prompt = _build_golden_needle_prompt("some resume text")
+        features = {"hard_labels": ["Python"], "soft_labels": ["built scalable systems"], "seniority": "senior", "domain": "ml-engineering"}
+        forbidden_words = ["built", "scalable", "systems"]
+        prompt = _build_golden_needle_prompt(features, forbidden_words)
         # Verify the constraint is in the prompt
         assert ("verbatim" in prompt.lower() or "paraphrase" in prompt.lower()), (
             f"Expected 'verbatim' or 'paraphrase' in prompt, got: {prompt}"
@@ -352,6 +355,7 @@ class TestTask4GenerateNeedlesParseResponse:
         """Mock Gemini to return valid JSON; assert EvalCase has golden and adversarial."""
         from src.evaluation import generate_needles
         import logging
+        from unittest.mock import patch
 
         logger = logging.getLogger("test")
 
@@ -366,28 +370,31 @@ class TestTask4GenerateNeedlesParseResponse:
         adversarial_response = MagicMock()
         adversarial_response.text = '{"title": "Senior ML Engineer", "company": "TechCorp", "description": "Leading ML initiatives...", "deal_breaker": "Requires 15+ years experience"}'
 
-        # Setup side effects for two calls
+        # Setup side effects for two calls (golden + adversarial)
         gemini_client.models.generate_content.side_effect = [golden_response, adversarial_response]
 
-        # Call generate_needles
-        case = generate_needles(
-            resume_text="Data scientist with 5 years experience in Python.",
-            resume_id="test_user",
-            gemini_client=gemini_client,
-            model_id="gemini-2.5-flash",
-            logger=logger,
-            max_retries=3,
-        )
+        # Patch extract_resume_features and passes_semantic_check to bypass LLM calls
+        mock_features = {"hard_labels": ["Python"], "soft_labels": ["led teams"], "seniority": "senior", "domain": "ml-engineering"}
+        with patch("src.evaluation.extract_resume_features", return_value=mock_features), \
+             patch("src.evaluation.passes_semantic_check", return_value=(True, 0.8)):
+            case = generate_needles(
+                resume_text="Data scientist with 5 years experience in Python.",
+                resume_id="test_user",
+                gemini_client=gemini_client,
+                model_id="gemini-2.5-flash",
+                logger=logger,
+                max_retries=3,
+            )
 
-        # Assert structure
-        assert case.resume_id == "test_user"
-        assert case.golden.needle_type == "golden"
-        assert case.golden.true_relevance == 5
-        assert len(case.golden.description) > 0
-        assert case.adversarial.needle_type == "adversarial"
-        assert case.adversarial.true_relevance == 0
-        assert case.adversarial.deal_breaker == "Requires 15+ years experience"
-        assert case.adversarial.description == "Leading ML initiatives..."
+            # Assert structure
+            assert case.resume_id == "test_user"
+            assert case.golden.needle_type == "golden"
+            assert case.golden.true_relevance == 5
+            assert len(case.golden.description) > 0
+            assert case.adversarial.needle_type == "adversarial"
+            assert case.adversarial.true_relevance == 0
+            assert case.adversarial.deal_breaker == "Requires 15+ years experience"
+            assert case.adversarial.description == "Leading ML initiatives..."
 
 
 class TestTask4GenerateNeedlesRetriesOnBadJson:
@@ -397,6 +404,7 @@ class TestTask4GenerateNeedlesRetriesOnBadJson:
         """Mock Gemini to return {} first, then valid JSON; assert retried."""
         from src.evaluation import generate_needles
         import logging
+        from unittest.mock import patch
 
         logger = logging.getLogger("test")
 
@@ -418,14 +426,17 @@ class TestTask4GenerateNeedlesRetriesOnBadJson:
         # Setup side effects: bad response once for golden, then good responses
         gemini_client.models.generate_content.side_effect = [bad_response, good_golden, good_adversarial]
 
-        case = generate_needles(
-            resume_text="Data scientist with 5 years experience.",
-            resume_id="test_user",
-            gemini_client=gemini_client,
-            model_id="gemini-2.5-flash",
-            logger=logger,
-            max_retries=3,
-        )
+        mock_features = {"hard_labels": ["Python"], "soft_labels": ["led teams"], "seniority": "senior", "domain": "ml-engineering"}
+        with patch("src.evaluation.extract_resume_features", return_value=mock_features), \
+             patch("src.evaluation.passes_semantic_check", return_value=(True, 0.8)):
+            case = generate_needles(
+                resume_text="Data scientist with 5 years experience.",
+                resume_id="test_user",
+                gemini_client=gemini_client,
+                model_id="gemini-2.5-flash",
+                logger=logger,
+                max_retries=3,
+            )
 
         # Assert it succeeded after retry
         assert case.golden.title == "Senior ML Engineer"
@@ -440,6 +451,7 @@ class TestTask4GenerateNeedlesRaisesAfterMaxRetries:
         """Mock Gemini to always return {}; assert RuntimeError raised."""
         from src.evaluation import generate_needles
         import logging
+        from unittest.mock import patch
 
         logger = logging.getLogger("test")
 
@@ -451,16 +463,19 @@ class TestTask4GenerateNeedlesRaisesAfterMaxRetries:
         bad_response.text = "{}"
         gemini_client.models.generate_content.return_value = bad_response
 
+        mock_features = {"hard_labels": ["Python"], "soft_labels": ["led teams"], "seniority": "senior", "domain": "ml-engineering"}
         # Should raise RuntimeError after max_retries
-        with pytest.raises(RuntimeError, match="Failed to generate golden needle"):
-            generate_needles(
-                resume_text="Data scientist.",
-                resume_id="test_user",
-                gemini_client=gemini_client,
-                model_id="gemini-2.5-flash",
-                logger=logger,
-                max_retries=2,
-            )
+        with patch("src.evaluation.extract_resume_features", return_value=mock_features), \
+             patch("src.evaluation.passes_semantic_check", return_value=(True, 0.8)):
+            with pytest.raises(RuntimeError, match="Failed to generate golden needle"):
+                generate_needles(
+                    resume_text="Data scientist.",
+                    resume_id="test_user",
+                    gemini_client=gemini_client,
+                    model_id="gemini-2.5-flash",
+                    logger=logger,
+                    max_retries=2,
+                )
 
 
 class TestTask5GoldenNeedleFlagged:
