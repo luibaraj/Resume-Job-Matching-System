@@ -1,6 +1,9 @@
 # Gemini API
 google-genai>=1.0.0
 
+# Anthropic API
+anthropic>=0.25.0
+
 # HTTP
 requests==2.32.3
 urllib3==2.2.2

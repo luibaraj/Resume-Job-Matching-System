@@ -128,6 +128,30 @@ class DatabaseManager:
 
                 CREATE INDEX IF NOT EXISTS idx_job_summaries_job_id ON job_summaries(job_id);
                 CREATE INDEX IF NOT EXISTS idx_job_summaries_passed_eval ON job_summaries(passed_eval);
+
+                CREATE TABLE IF NOT EXISTS eval_needles (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    resume_id           TEXT    NOT NULL UNIQUE,
+                    resume_text         TEXT    NOT NULL,
+                    golden_title        TEXT    NOT NULL,
+                    golden_company      TEXT    NOT NULL,
+                    golden_description  TEXT    NOT NULL,
+                    adversarial_title   TEXT    NOT NULL,
+                    adversarial_company TEXT    NOT NULL,
+                    adversarial_description TEXT NOT NULL,
+                    deal_breaker        TEXT    NOT NULL,
+                    generator_model_id  TEXT    NOT NULL,
+                    created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_results (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id      TEXT    NOT NULL,
+                    resume_id   TEXT    NOT NULL,
+                    metric      TEXT    NOT NULL,
+                    value       REAL    NOT NULL,
+                    computed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                );
                 """
             )
             # Add is_us column for existing databases

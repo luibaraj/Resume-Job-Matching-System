@@ -108,6 +108,26 @@ class Config:
         default_factory=lambda: int(os.environ.get("GENERATION_MAX_RETRIES", "2"))
     )
 
+    # Evaluation
+    anthropic_api_key: str = field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", "")
+    )
+    eval_judge_model_id: str = field(
+        default_factory=lambda: os.environ.get("EVAL_JUDGE_MODEL_ID", "claude-sonnet-4-6")
+    )
+    eval_needle_gen_model_id: str = field(
+        default_factory=lambda: os.environ.get("EVAL_NEEDLE_GEN_MODEL_ID", "gemini-2.5-flash")
+    )
+    eval_top_k: int = field(
+        default_factory=lambda: int(os.environ.get("EVAL_TOP_K", "50"))
+    )
+    eval_needles_path: str = field(
+        default_factory=lambda: os.environ.get("EVAL_NEEDLES_PATH", "data/eval_needles.json")
+    )
+    eval_report_path: str = field(
+        default_factory=lambda: os.environ.get("EVAL_REPORT_PATH", "data/eval_report.json")
+    )
+
     # Logging
     log_level: str = field(
         default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
