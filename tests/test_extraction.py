@@ -223,30 +223,26 @@ class TestExtractJob:
         client.models.generate_content.return_value = _make_gemini_response("not json {{")
         result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
-        # Both token-limit attempts should have been made
-        assert client.models.generate_content.call_count == 2
+        # Single attempt (no retry logic)
+        assert client.models.generate_content.call_count == 1
 
     def test_invalid_json_first_attempt_succeeds_on_retry(self):
+        # This test is no longer relevant since retry logic was removed.
+        # Keeping as a placeholder: a single invalid JSON response now returns None.
         client = MagicMock()
-        client.models.generate_content.side_effect = [
-            _make_gemini_response("not json {{"),
-            _make_gemini_response(json.dumps(VALID_EXTRACTION)),
-        ]
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
-        assert result is not None
-        job_id, data = result
-        assert job_id == 1
-        assert client.models.generate_content.call_count == 2
-
-    def test_invalid_json_both_attempts_fail_returns_none(self):
-        client = MagicMock()
-        client.models.generate_content.side_effect = [
-            _make_gemini_response("not json {{"),
-            _make_gemini_response("still not json {{"),
-        ]
+        client.models.generate_content.return_value = _make_gemini_response("not json {{")
         result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
         assert result is None
-        assert client.models.generate_content.call_count == 2
+        assert client.models.generate_content.call_count == 1
+
+    def test_invalid_json_both_attempts_fail_returns_none(self):
+        # This test is no longer relevant since retry logic was removed.
+        # A single invalid JSON response now returns None.
+        client = MagicMock()
+        client.models.generate_content.return_value = _make_gemini_response("not json {{")
+        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
+        assert result is None
+        assert client.models.generate_content.call_count == 1
 
     def test_schema_mismatch_returns_none(self):
         client = MagicMock()

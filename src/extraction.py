@@ -135,38 +135,29 @@ def extract_job(record: tuple[int, str | None, str], client, model_id: str) -> t
         return None
 
     prompt = EXTRACTION_SYSTEM_PROMPT + "\n\n" + SKELETON_TEMPLATE.replace("{text}", cleaned_description)
-    token_limits = [512, 1024]
 
-    for attempt, max_tokens in enumerate(token_limits):
-        try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=max_tokens,
-                    response_mime_type="application/json",
-                ),
-            )
-            content = response.text
-            parsed = json.loads(content)
-            jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
-            return (job_id, parsed)
-        except json.JSONDecodeError as e:
-            if attempt < len(token_limits) - 1:
-                logger.warning(
-                    "Job %d: invalid JSON (max_tokens=%d), retrying with max_tokens=%d",
-                    job_id, max_tokens, token_limits[attempt + 1],
-                )
-                continue
-            logger.warning("Job %d: invalid JSON after retry: %s", job_id, e)
-            return None
-        except jsonschema.ValidationError as e:
-            logger.warning("Job %d: schema validation failed: %s", job_id, e.message)
-            return None
-        except Exception as e:
-            logger.warning("Job %d: extraction failed: %s", job_id, e)
-            return None
+    try:
+        response = client.models.generate_content(
+            model=model_id,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.0,
+                response_mime_type="application/json",
+            ),
+        )
+        content = response.text
+        parsed = json.loads(content)
+        jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
+        return (job_id, parsed)
+    except json.JSONDecodeError as e:
+        logger.warning("Job %d: invalid JSON: %s", job_id, e)
+        return None
+    except jsonschema.ValidationError as e:
+        logger.warning("Job %d: schema validation failed: %s", job_id, e.message)
+        return None
+    except Exception as e:
+        logger.warning("Job %d: extraction failed: %s", job_id, e)
+        return None
 
 
 def extract_jobs(
