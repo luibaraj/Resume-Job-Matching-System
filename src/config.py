@@ -109,11 +109,11 @@ class Config:
     )
 
     # Evaluation
-    anthropic_api_key: str = field(
-        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", "")
+    openai_api_key: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_API_KEY", "")
     )
     eval_judge_model_id: str = field(
-        default_factory=lambda: os.environ.get("EVAL_JUDGE_MODEL_ID", "claude-sonnet-4-6")
+        default_factory=lambda: os.environ.get("EVAL_JUDGE_MODEL_ID", "gpt-5-mini")
     )
     eval_needle_gen_model_id: str = field(
         default_factory=lambda: os.environ.get("EVAL_NEEDLE_GEN_MODEL_ID", "gemini-2.5-flash")
@@ -175,4 +175,6 @@ def load_config() -> Config:
         raise ValueError("GENERATION_TOP_K must be >= 1")
     if config.generation_max_retries < 0:
         raise ValueError("GENERATION_MAX_RETRIES must be >= 0")
+    if not config.openai_api_key:
+        raise ValueError("OPENAI_API_KEY must be set")
     return config

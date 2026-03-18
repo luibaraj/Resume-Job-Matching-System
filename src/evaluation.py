@@ -19,6 +19,7 @@ from src.database import DatabaseManager
 
 if TYPE_CHECKING:
     from src.config import Config
+    from openai import OpenAI
 
 
 GOLDEN_NEEDLE_ID = -1        # sentinel job_id for the golden needle
@@ -838,18 +839,18 @@ def _judge_single_item(
     resume_text: str,
     job_title: str,
     job_description: str,
-    anthropic_client,        # anthropic.Anthropic
+    openai_client: OpenAI,
     judge_model_id: str,
     logger: logging.Logger,
 ) -> tuple[int, str]:
-    """Judge a single job against a resume using Claude.
+    """Judge a single job against a resume using GPT.
 
     Args:
         resume_text: Candidate resume
         job_title: Job title
         job_description: Job description
-        anthropic_client: Anthropic client instance
-        judge_model_id: Claude model ID
+        openai_client: OpenAI client instance
+        judge_model_id: OpenAI model ID
         logger: Logger instance
 
     Returns:
@@ -870,7 +871,18 @@ GRADED RUBRIC:
 
 Valid scores: {0, 1, 2, 3, 5}. Do NOT use 4.
 
-Respond with JSON: {"relevance_score": <int>, "reasoning": "<str>"}"""
+EXPLANATION-FIRST REASONING (REQUIRED):
+Before outputting your score, you MUST:
+1. Extract key requirements from the job description (title, required skills, experience level, location constraints, domain)
+2. Identify candidate qualifications from the resume (skills, experience, seniority, location, domain expertise)
+3. Perform point-by-point comparison:
+   - For each job requirement, cite specific evidence from the resume or explicitly note the gap
+   - Flag any disqualifying constraints (location, visa, experience floor, domain mismatch)
+4. Synthesize: Summarize alignment and gaps, then justify your final score based on the evidence extracted above
+
+IMPORTANT: Your final score MUST be strictly derived from the step-by-step analysis you provided above. Do not score based on unstated intuitions.
+
+Respond with JSON: {"analysis": "<step-by-step reasoning with cited evidence>", "relevance_score": <int>}"""
 
     user_prompt = f"""Resume:
 {resume_text}
@@ -884,15 +896,17 @@ Evaluate the fit."""
 
     for attempt in range(JUDGE_RETRY_ATTEMPTS):
         try:
-            response = anthropic_client.messages.create(
+            response = openai_client.chat.completions.create(
                 model=judge_model_id,
                 max_tokens=500,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
 
             # Extract JSON from response
-            response_text = response.content[0].text
+            response_text = response.choices[0].message.content
             try:
                 import json as json_module
                 result = json_module.loads(response_text)
@@ -910,7 +924,7 @@ Evaluate the fit."""
                     raise json_module.JSONDecodeError("No JSON found", response_text, 0)
 
             score = int(result.get("relevance_score", 0))
-            reasoning = result.get("reasoning", "")
+            reasoning = result.get("analysis", result.get("reasoning", ""))
 
             # Validate score
             if score not in {0, 1, 2, 3, 5}:
@@ -937,7 +951,7 @@ Evaluate the fit."""
 def judge_retrieved_items(
     resume_text: str,
     items: list[RetrievedItem],
-    anthropic_client,
+    openai_client: OpenAI,
     judge_model_id: str,
     logger: logging.Logger,
 ) -> list[JudgedItem]:
@@ -946,8 +960,8 @@ def judge_retrieved_items(
     Args:
         resume_text: Candidate resume text
         items: List of RetrievedItem objects
-        anthropic_client: Anthropic client instance
-        judge_model_id: Claude model ID
+        openai_client: OpenAI client instance
+        judge_model_id: OpenAI model ID
         logger: Logger instance
 
     Returns:
@@ -972,7 +986,7 @@ def judge_retrieved_items(
                 resume_text,
                 item.title,
                 item.description,
-                anthropic_client,
+                openai_client,
                 judge_model_id,
                 logger,
             )
@@ -1003,7 +1017,7 @@ def judge_retrieved_items(
 def run_judge_phase(
     cases: list[EvalCase],
     retrieved_per_case: dict[str, list[RetrievedItem]],
-    anthropic_client,
+    openai_client: OpenAI,
     judge_model_id: str,
     logger: logging.Logger,
 ) -> dict[str, list[JudgedItem]]:
@@ -1012,8 +1026,8 @@ def run_judge_phase(
     Args:
         cases: List of EvalCase objects
         retrieved_per_case: Dict mapping resume_id -> list[RetrievedItem]
-        anthropic_client: Anthropic client instance
-        judge_model_id: Claude model ID
+        openai_client: OpenAI client instance
+        judge_model_id: OpenAI model ID
         logger: Logger instance
 
     Returns:
@@ -1026,7 +1040,7 @@ def run_judge_phase(
         judged = judge_retrieved_items(
             case.resume_text,
             retrieved,
-            anthropic_client,
+            openai_client,
             judge_model_id,
             logger,
         )
@@ -1420,11 +1434,11 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        import anthropic
+        from openai import OpenAI
 
-        anthropic_client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+        openai_client = OpenAI(api_key=cfg.openai_api_key)
     except Exception as e:
-        logger.error(f"Failed to init Anthropic client: {e}")
+        logger.error(f"Failed to init OpenAI client: {e}")
         sys.exit(1)
 
     # Run evaluation pipeline
@@ -1434,7 +1448,7 @@ def main() -> None:
     )
 
     logger.info("Starting judge phase")
-    judged_per_case = run_judge_phase(cases, retrieved_per_case, anthropic_client, cfg.eval_judge_model_id, logger)
+    judged_per_case = run_judge_phase(cases, retrieved_per_case, openai_client, cfg.eval_judge_model_id, logger)
 
     logger.info("Computing metrics")
     eval_results = []

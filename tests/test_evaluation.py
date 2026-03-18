@@ -72,7 +72,7 @@ class TestTask1ConfigEvalDefaults:
         """Config instantiation with no eval env vars has correct defaults."""
         # Clear any existing eval env vars
         for key in [
-            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
             "EVAL_JUDGE_MODEL_ID",
             "EVAL_NEEDLE_GEN_MODEL_ID",
             "EVAL_TOP_K",
@@ -82,8 +82,8 @@ class TestTask1ConfigEvalDefaults:
             monkeypatch.delenv(key, raising=False)
 
         cfg = Config()
-        assert cfg.anthropic_api_key == ""
-        assert cfg.eval_judge_model_id == "claude-sonnet-4-6"
+        assert cfg.openai_api_key == ""
+        assert cfg.eval_judge_model_id == "gpt-5-mini"
         assert cfg.eval_needle_gen_model_id == "gemini-2.5-flash"
         assert cfg.eval_top_k == 50
         assert cfg.eval_needles_path == "data/eval_needles.json"
@@ -849,15 +849,15 @@ class TestTask6GoldenSkipsApi:
             needle_type="golden",
         )
 
-        # Mock Anthropic client
-        anthropic_client = MagicMock()
+        # Mock OpenAI client
+        openai_client = MagicMock()
 
         # Judge the item
         judged = judge_retrieved_items(
             resume_text="Resume text",
             items=[item],
-            anthropic_client=anthropic_client,
-            judge_model_id="claude-sonnet-4-6",
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
             logger=logger,
         )
 
@@ -865,7 +865,7 @@ class TestTask6GoldenSkipsApi:
         assert len(judged) == 1
         assert judged[0].relevance_score == 5
         assert judged[0].judge_reasoning == "golden needle (deterministic)"
-        anthropic_client.messages.create.assert_not_called()
+        openai_client.chat.completions.create.assert_not_called()
 
 
 class TestTask6AdversarialSkipsApi:
@@ -889,15 +889,15 @@ class TestTask6AdversarialSkipsApi:
             needle_type="adversarial",
         )
 
-        # Mock Anthropic client
-        anthropic_client = MagicMock()
+        # Mock OpenAI client
+        openai_client = MagicMock()
 
         # Judge the item
         judged = judge_retrieved_items(
             resume_text="Resume text",
             items=[item],
-            anthropic_client=anthropic_client,
-            judge_model_id="claude-sonnet-4-6",
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
             logger=logger,
         )
 
@@ -905,14 +905,14 @@ class TestTask6AdversarialSkipsApi:
         assert len(judged) == 1
         assert judged[0].relevance_score == 0
         assert judged[0].judge_reasoning == "adversarial needle (deterministic)"
-        anthropic_client.messages.create.assert_not_called()
+        openai_client.chat.completions.create.assert_not_called()
 
 
 class TestTask6ParsesValidScore:
-    """test_task6_parses_valid_score: Valid JSON response is parsed correctly."""
+    """test_task6_parses_valid_score: Valid JSON response with analysis field is parsed correctly."""
 
     def test_task6_parses_valid_score(self):
-        """Mock Anthropic returning valid JSON; assert score is parsed."""
+        """Mock OpenAI returning valid JSON with analysis field; assert score is parsed."""
         import logging
         import json as json_module
 
@@ -930,33 +930,39 @@ class TestTask6ParsesValidScore:
             needle_type=None,
         )
 
-        # Mock Anthropic client
-        anthropic_client = MagicMock()
+        # Mock OpenAI client
+        openai_client = MagicMock()
         response = MagicMock()
-        response.content = [MagicMock()]
-        response.content[0].text = json_module.dumps({"relevance_score": 3, "reasoning": "good fit"})
-        anthropic_client.messages.create.return_value = response
+        response.choices = [MagicMock()]
+        analysis_text = """
+        1. Job Requirements: Python, 5+ years, US location
+        2. Resume Qualifications: Python (cited: "Expert Python developer"), 6 years experience, Remote (CA)
+        3. Point-by-point: ✓ Python match, ✓ Experience exceeds 5 years, ✓ US location (CA)
+        4. Synthesis: All requirements met, strong alignment
+        """
+        response.choices[0].message.content = json_module.dumps({"analysis": analysis_text, "relevance_score": 3})
+        openai_client.chat.completions.create.return_value = response
 
         # Judge the item
         judged = judge_retrieved_items(
             resume_text="Resume text",
             items=[item],
-            anthropic_client=anthropic_client,
-            judge_model_id="claude-sonnet-4-6",
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
             logger=logger,
         )
 
         # Assert score was parsed correctly
         assert len(judged) == 1
         assert judged[0].relevance_score == 3
-        assert judged[0].judge_reasoning == "good fit"
+        assert judged[0].judge_reasoning == analysis_text
 
 
 class TestTask6RejectsInvalidScore:
     """test_task6_rejects_invalid_score: Invalid scores (e.g., 4) are rejected."""
 
     def test_task6_rejects_invalid_score(self):
-        """Mock Anthropic returning invalid score 4; assert retries and returns error."""
+        """Mock OpenAI returning invalid score 4; assert retries and returns error."""
         import logging
         import json as json_module
 
@@ -974,20 +980,21 @@ class TestTask6RejectsInvalidScore:
             needle_type=None,
         )
 
-        # Mock Anthropic client
-        anthropic_client = MagicMock()
+        # Mock OpenAI client
+        openai_client = MagicMock()
         response = MagicMock()
-        response.content = [MagicMock()]
-        # Return invalid score 4 every time
-        response.content[0].text = json_module.dumps({"relevance_score": 4, "reasoning": "invalid"})
-        anthropic_client.messages.create.return_value = response
+        response.choices = [MagicMock()]
+        # Return invalid score 4 every time (4 is not in valid set {0, 1, 2, 3, 5})
+        analysis_text = "Invalid reasoning text"
+        response.choices[0].message.content = json_module.dumps({"analysis": analysis_text, "relevance_score": 4})
+        openai_client.chat.completions.create.return_value = response
 
         # Judge the item
         judged = judge_retrieved_items(
             resume_text="Resume text",
             items=[item],
-            anthropic_client=anthropic_client,
-            judge_model_id="claude-sonnet-4-6",
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
             logger=logger,
         )
 
@@ -995,6 +1002,124 @@ class TestTask6RejectsInvalidScore:
         assert len(judged) == 1
         assert judged[0].relevance_score == 0
         assert judged[0].judge_reasoning == "judge_error"
+
+
+class TestTask6ExplanationFirstReasoning:
+    """test_task6_explanation_first_reasoning: Analysis field is preserved and used as reasoning."""
+
+    def test_task6_explanation_first_reasoning(self):
+        """Verify that the analysis field (explanation-first reasoning) is extracted and stored."""
+        import logging
+        import json as json_module
+
+        logger = logging.getLogger("test")
+
+        # Create regular retrieved item
+        item = RetrievedItem(
+            job_id=1,
+            rank=1,
+            rrf_score=0.85,
+            rerank_score=0.85,
+            title="ML Engineer Role",
+            description="Seeking experienced ML engineer with Python and PyTorch",
+            is_needle=False,
+            needle_type=None,
+        )
+
+        # Mock OpenAI client with detailed explanation-first response
+        openai_client = MagicMock()
+        response = MagicMock()
+        response.choices = [MagicMock()]
+
+        detailed_analysis = """
+        1. Job Requirements Extraction:
+           - Title: ML Engineer
+           - Required Skills: Python, PyTorch, 5+ years
+           - Location: Not specified (assumed remote)
+
+        2. Resume Qualifications:
+           - Title: Senior Software Engineer (cited: "Led ML projects")
+           - Skills: Python (expert level, cited: "7 years Python"), PyTorch (intermediate), TensorFlow
+           - Experience: 7 years total, 4 in ML (cited: "4 years dedicated ML work")
+
+        3. Point-by-point Comparison:
+           - Python: ✓ Match (7 years experience from resume)
+           - PyTorch: Partial match (intermediate, role needs experienced)
+           - Experience: Partial match (4 years ML < 5 required, though total 7 years)
+           - Location: ✓ Match (Remote preferred, remote assumed)
+
+        4. Disqualifying Constraints: None identified
+
+        5. Synthesis: Strong ML foundation with Python expertise, but PyTorch experience slightly below ideal.
+           Recommend consideration due to overall strength and transferable skills.
+
+        Final Score Justification: Score 3 (Strong partial match) because candidate meets most criteria
+        (Python, location) but falls slightly short on PyTorch depth and total ML experience floor.
+        """
+
+        response.choices[0].message.content = json_module.dumps({
+            "analysis": detailed_analysis,
+            "relevance_score": 3
+        })
+        openai_client.chat.completions.create.return_value = response
+
+        # Judge the item
+        judged = judge_retrieved_items(
+            resume_text="Senior Software Engineer with 7 years Python, 4 years ML work",
+            items=[item],
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
+            logger=logger,
+        )
+
+        # Assert that the detailed analysis is preserved
+        assert len(judged) == 1
+        assert judged[0].relevance_score == 3
+        assert judged[0].judge_reasoning == detailed_analysis
+        assert "Point-by-point Comparison" in judged[0].judge_reasoning
+        assert "Final Score Justification" in judged[0].judge_reasoning
+
+    def test_task6_backward_compat_reasoning_field(self):
+        """Verify backward compatibility: 'reasoning' field falls back if 'analysis' missing."""
+        import logging
+        import json as json_module
+
+        logger = logging.getLogger("test")
+
+        item = RetrievedItem(
+            job_id=2,
+            rank=1,
+            rrf_score=0.75,
+            rerank_score=0.75,
+            title="Job Title",
+            description="Job description",
+            is_needle=False,
+            needle_type=None,
+        )
+
+        # Mock OpenAI client with old-style response (reasoning field, no analysis)
+        openai_client = MagicMock()
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        # Use old format with only 'reasoning' field (no 'analysis')
+        response.choices[0].message.content = json_module.dumps({
+            "relevance_score": 2,
+            "reasoning": "Partial match"
+        })
+        openai_client.chat.completions.create.return_value = response
+
+        judged = judge_retrieved_items(
+            resume_text="Resume text",
+            items=[item],
+            openai_client=openai_client,
+            judge_model_id="gpt-5-mini",
+            logger=logger,
+        )
+
+        # Assert backward compatibility: falls back to 'reasoning' field
+        assert len(judged) == 1
+        assert judged[0].relevance_score == 2
+        assert judged[0].judge_reasoning == "Partial match"
 
 
 class TestTask7RecallGoldenInTopK:

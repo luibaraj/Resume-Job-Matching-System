@@ -18,6 +18,8 @@ class TestLoadConfig:
         monkeypatch.delenv("RETRY_BACKOFF", raising=False)
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         config = load_config()
 
@@ -32,6 +34,7 @@ class TestLoadConfig:
         """Default greenhouse_board_tokens is an empty list."""
         monkeypatch.delenv("GREENHOUSE_BOARD_TOKENS", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.greenhouse_board_tokens == []
         assert isinstance(config.greenhouse_board_tokens, list)
@@ -40,6 +43,7 @@ class TestLoadConfig:
         """Reads DB_PATH from environment variable."""
         monkeypatch.setenv("DB_PATH", "/tmp/test.db")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.db_path == "/tmp/test.db"
 
@@ -47,6 +51,7 @@ class TestLoadConfig:
         """Reads LOG_LEVEL from environment variable."""
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.log_level == "DEBUG"
 
@@ -54,6 +59,7 @@ class TestLoadConfig:
         """Reads REQUEST_TIMEOUT from environment variable as integer."""
         monkeypatch.setenv("REQUEST_TIMEOUT", "60")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.request_timeout_seconds == 60
         assert isinstance(config.request_timeout_seconds, int)
@@ -62,6 +68,7 @@ class TestLoadConfig:
         """Reads MAX_RETRIES from environment variable."""
         monkeypatch.setenv("MAX_RETRIES", "5")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.max_retries == 5
 
@@ -69,6 +76,7 @@ class TestLoadConfig:
         """Reads RETRY_BACKOFF from environment variable as float."""
         monkeypatch.setenv("RETRY_BACKOFF", "1.5")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.retry_backoff_seconds == 1.5
         assert isinstance(config.retry_backoff_seconds, float)
@@ -77,6 +85,7 @@ class TestLoadConfig:
         """Parses comma-separated board tokens."""
         monkeypatch.setenv("GREENHOUSE_BOARD_TOKENS", "openai,anthropic")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.greenhouse_board_tokens == ["openai", "anthropic"]
 
@@ -84,6 +93,7 @@ class TestLoadConfig:
         """Single board token is parsed into a list."""
         monkeypatch.setenv("GREENHOUSE_BOARD_TOKENS", "openai")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.greenhouse_board_tokens == ["openai"]
 
@@ -91,6 +101,7 @@ class TestLoadConfig:
         """Whitespace is stripped from each token."""
         monkeypatch.setenv("GREENHOUSE_BOARD_TOKENS", " openai , anthropic ")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.greenhouse_board_tokens == ["openai", "anthropic"]
 
@@ -98,6 +109,7 @@ class TestLoadConfig:
         """Empty segments in token list are filtered out."""
         monkeypatch.setenv("GREENHOUSE_BOARD_TOKENS", "openai,,anthropic")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.greenhouse_board_tokens == ["openai", "anthropic"]
 
@@ -105,6 +117,7 @@ class TestLoadConfig:
         """load_config returns a Config instance."""
         monkeypatch.delenv("DB_PATH", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert isinstance(config, Config)
 
@@ -116,6 +129,7 @@ class TestPreprocessingConfig:
         """preprocessing_workers defaults to os.cpu_count() or 1."""
         monkeypatch.delenv("PREPROCESSING_WORKERS", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         import os
         assert config.preprocessing_workers == (os.cpu_count() or 1)
@@ -124,6 +138,7 @@ class TestPreprocessingConfig:
         """preprocessing_chunk_size defaults to 500."""
         monkeypatch.delenv("PREPROCESSING_CHUNK_SIZE", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_chunk_size == 500
 
@@ -131,6 +146,7 @@ class TestPreprocessingConfig:
         """Reads PREPROCESSING_WORKERS from environment."""
         monkeypatch.setenv("PREPROCESSING_WORKERS", "4")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_workers == 4
 
@@ -138,6 +154,7 @@ class TestPreprocessingConfig:
         """Reads PREPROCESSING_CHUNK_SIZE from environment."""
         monkeypatch.setenv("PREPROCESSING_CHUNK_SIZE", "1000")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_chunk_size == 1000
 
@@ -145,6 +162,7 @@ class TestPreprocessingConfig:
         """PREPROCESSING_WORKERS=0 raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_WORKERS", "0")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="PREPROCESSING_WORKERS must be >= 1"):
             load_config()
 
@@ -152,6 +170,7 @@ class TestPreprocessingConfig:
         """PREPROCESSING_CHUNK_SIZE=0 raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_CHUNK_SIZE", "0")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="PREPROCESSING_CHUNK_SIZE must be >= 1"):
             load_config()
 
@@ -159,6 +178,7 @@ class TestPreprocessingConfig:
         """Negative PREPROCESSING_WORKERS raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_WORKERS", "-1")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="PREPROCESSING_WORKERS must be >= 1"):
             load_config()
 
@@ -166,6 +186,7 @@ class TestPreprocessingConfig:
         """Negative PREPROCESSING_CHUNK_SIZE raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_CHUNK_SIZE", "-1")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="PREPROCESSING_CHUNK_SIZE must be >= 1"):
             load_config()
 
@@ -173,6 +194,7 @@ class TestPreprocessingConfig:
         """preprocessing_max_retries defaults to 2."""
         monkeypatch.delenv("PREPROCESSING_MAX_RETRIES", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_max_retries == 2
 
@@ -180,6 +202,7 @@ class TestPreprocessingConfig:
         """Reads PREPROCESSING_MAX_RETRIES from environment."""
         monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "5")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_max_retries == 5
 
@@ -187,6 +210,7 @@ class TestPreprocessingConfig:
         """PREPROCESSING_MAX_RETRIES=0 is valid (no retries)."""
         monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "0")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.preprocessing_max_retries == 0
 
@@ -194,6 +218,7 @@ class TestPreprocessingConfig:
         """Negative PREPROCESSING_MAX_RETRIES raises ValueError."""
         monkeypatch.setenv("PREPROCESSING_MAX_RETRIES", "-1")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="PREPROCESSING_MAX_RETRIES must be >= 0"):
             load_config()
 
@@ -217,6 +242,7 @@ class TestExtractionConfig:
         """extraction_model_id defaults to gemini-2.5-flash."""
         monkeypatch.delenv("EXTRACTION_MODEL_ID", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.extraction_model_id == "gemini-2.5-flash"
 
@@ -224,6 +250,7 @@ class TestExtractionConfig:
         """Reads EXTRACTION_MODEL_ID from environment."""
         monkeypatch.setenv("EXTRACTION_MODEL_ID", "gemini-2.0-flash")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.extraction_model_id == "gemini-2.0-flash"
 
@@ -231,6 +258,7 @@ class TestExtractionConfig:
         """extraction_chunk_size defaults to 50."""
         monkeypatch.delenv("EXTRACTION_CHUNK_SIZE", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         config = load_config()
         assert config.extraction_chunk_size == 50
 
@@ -238,5 +266,6 @@ class TestExtractionConfig:
         """EXTRACTION_CHUNK_SIZE=0 raises ValueError."""
         monkeypatch.setenv("EXTRACTION_CHUNK_SIZE", "0")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with pytest.raises(ValueError, match="EXTRACTION_CHUNK_SIZE must be >= 1"):
             load_config()

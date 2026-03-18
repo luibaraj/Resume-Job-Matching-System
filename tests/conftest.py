@@ -8,6 +8,18 @@ import pytest
 from src.database import DatabaseManager
 
 
+@pytest.fixture(autouse=True)
+def _setup_required_env_vars(monkeypatch):
+    """Auto-set required API keys for all tests.
+
+    These are required by load_config() validation, so we set them globally
+    to avoid having to set them in every test. Individual tests can override
+    or delete these as needed.
+    """
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+
 @pytest.fixture
 def sample_job_description() -> str:
     """Load a realistic HTML job description from data/sample_jobs.json.
