@@ -1,7 +1,6 @@
+import asyncio
 import json
-import queue
-import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import jsonschema
 import pytest
@@ -9,8 +8,7 @@ import pytest
 from src.database import DatabaseManager
 from src.extraction import (
     EXTRACTION_JSON_SCHEMA,
-    _db_writer_thread,
-    extract_job,
+    _extract_job_async,
     extract_jobs,
 )
 
@@ -199,69 +197,70 @@ class TestJsonSchemaValidation:
 
 
 # ---------------------------------------------------------------------------
-# extract_job with mocked Gemini client
+# _extract_job_async with mocked Gemini client
 # ---------------------------------------------------------------------------
 
 
-class TestExtractJob:
+class TestExtractJobAsync:
     MODEL_ID = "gemini-2.5-flash"
 
-    def test_success_returns_tuple(self):
+    @pytest.mark.asyncio
+    async def test_success_returns_tuple(self):
         client = MagicMock()
-        client.models.generate_content.return_value = _make_gemini_response(
-            json.dumps(VALID_EXTRACTION)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock(
+            return_value=_make_gemini_response(json.dumps(VALID_EXTRACTION))
         )
-        result = extract_job((42, "Some job description text", "Software Engineer"), client, self.MODEL_ID)
+        semaphore = asyncio.Semaphore(10)
+        result = await _extract_job_async((42, "Some job description text", "Software Engineer"), semaphore, client, self.MODEL_ID)
         assert result is not None
         job_id, data = result
         assert job_id == 42
         assert data["job_title"] == "Software Engineer"
-        assert client.models.generate_content.call_count == 1
+        assert client.aio.models.generate_content.call_count == 1
 
-    def test_invalid_json_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_none(self):
         client = MagicMock()
-        client.models.generate_content.return_value = _make_gemini_response("not json {{")
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock(return_value=_make_gemini_response("not json {{"))
+        semaphore = asyncio.Semaphore(10)
+        result = await _extract_job_async((1, "desc", "title"), semaphore, client, self.MODEL_ID)
         assert result is None
-        # Single attempt (no retry logic)
-        assert client.models.generate_content.call_count == 1
+        assert client.aio.models.generate_content.call_count == 1
 
-    def test_invalid_json_first_attempt_succeeds_on_retry(self):
-        # This test is no longer relevant since retry logic was removed.
-        # Keeping as a placeholder: a single invalid JSON response now returns None.
+    @pytest.mark.asyncio
+    async def test_schema_mismatch_returns_none(self):
         client = MagicMock()
-        client.models.generate_content.return_value = _make_gemini_response("not json {{")
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
-        assert result is None
-        assert client.models.generate_content.call_count == 1
-
-    def test_invalid_json_both_attempts_fail_returns_none(self):
-        # This test is no longer relevant since retry logic was removed.
-        # A single invalid JSON response now returns None.
-        client = MagicMock()
-        client.models.generate_content.return_value = _make_gemini_response("not json {{")
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
-        assert result is None
-        assert client.models.generate_content.call_count == 1
-
-    def test_schema_mismatch_returns_none(self):
-        client = MagicMock()
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
         bad = {k: v for k, v in VALID_EXTRACTION.items() if k != "job_title"}
-        client.models.generate_content.return_value = _make_gemini_response(json.dumps(bad))
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
+        client.aio.models.generate_content = AsyncMock(return_value=_make_gemini_response(json.dumps(bad)))
+        semaphore = asyncio.Semaphore(10)
+        result = await _extract_job_async((1, "desc", "title"), semaphore, client, self.MODEL_ID)
         assert result is None
 
-    def test_model_exception_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_model_exception_returns_none(self):
         client = MagicMock()
-        client.models.generate_content.side_effect = RuntimeError("API error")
-        result = extract_job((1, "desc", "title"), client, self.MODEL_ID)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("API error"))
+        semaphore = asyncio.Semaphore(10)
+        result = await _extract_job_async((1, "desc", "title"), semaphore, client, self.MODEL_ID)
         assert result is None
 
-    def test_none_description_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_none_description_returns_none(self):
         client = MagicMock()
-        result = extract_job((1, None, "title"), client, self.MODEL_ID)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        semaphore = asyncio.Semaphore(10)
+        result = await _extract_job_async((1, None, "title"), semaphore, client, self.MODEL_ID)
         assert result is None
-        client.models.generate_content.assert_not_called()
+        client.aio.models.generate_content.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +271,10 @@ class TestExtractJob:
 class TestExtractJobsLoop:
     def _make_mock_client(self):
         client = MagicMock()
-        client.models.generate_content.return_value = _make_gemini_response(
-            json.dumps(VALID_EXTRACTION)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock(
+            return_value=_make_gemini_response(json.dumps(VALID_EXTRACTION))
         )
         return client
 
@@ -282,11 +283,21 @@ class TestExtractJobsLoop:
             _insert_preprocessed_job(db_manager, job_id_override=3000 + i)
 
         mock_client = self._make_mock_client()
+
+        def mock_chunk_run(coro):
+            """Execute the async chunk coroutine synchronously."""
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
         with patch("src.extraction.genai.Client", return_value=mock_client):
-            processed, errors = extract_jobs(
-                db_manager, run_id=1, chunk_size=10,
-                api_key="fake-key", model_id="gemini-2.5-flash",
-            )
+            with patch("src.extraction.asyncio.run", side_effect=mock_chunk_run):
+                processed, errors = extract_jobs(
+                    db_manager, run_id=1, chunk_size=10,
+                    api_key="fake-key", model_id="gemini-2.5-flash",
+                )
 
         assert processed == 3
         assert errors == 0
@@ -298,15 +309,25 @@ class TestExtractJobsLoop:
         _insert_preprocessed_job(db_manager, job_id_override=4000)
 
         mock_client = self._make_mock_client()
+
+        def mock_chunk_run(coro):
+            """Execute the async chunk coroutine synchronously."""
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
         with patch("src.extraction.genai.Client", return_value=mock_client):
-            extract_jobs(
-                db_manager, run_id=1, chunk_size=10,
-                api_key="fake-key", model_id="gemini-2.5-flash",
-            )
-            processed2, errors2 = extract_jobs(
-                db_manager, run_id=2, chunk_size=10,
-                api_key="fake-key", model_id="gemini-2.5-flash",
-            )
+            with patch("src.extraction.asyncio.run", side_effect=mock_chunk_run):
+                extract_jobs(
+                    db_manager, run_id=1, chunk_size=10,
+                    api_key="fake-key", model_id="gemini-2.5-flash",
+                )
+                processed2, errors2 = extract_jobs(
+                    db_manager, run_id=2, chunk_size=10,
+                    api_key="fake-key", model_id="gemini-2.5-flash",
+                )
 
         assert processed2 == 0
         assert errors2 == 0
@@ -323,14 +344,25 @@ class TestExtractJobsLoop:
 
         # Always fail — client raises on every call
         mock_client = MagicMock()
-        mock_client.models.generate_content.side_effect = RuntimeError("API error")
+        mock_client.aio = MagicMock()
+        mock_client.aio.models = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("API error"))
+
+        def mock_chunk_run(coro):
+            """Execute the async chunk coroutine synchronously."""
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
 
         with patch("src.extraction.genai.Client", return_value=mock_client):
-            processed, errors = extract_jobs(
-                db_manager, run_id=1, chunk_size=10,
-                api_key="fake-key", model_id="gemini-2.5-flash",
-                max_retries=0,
-            )
+            with patch("src.extraction.asyncio.run", side_effect=mock_chunk_run):
+                processed, errors = extract_jobs(
+                    db_manager, run_id=1, chunk_size=10,
+                    api_key="fake-key", model_id="gemini-2.5-flash",
+                    max_retries=0,
+                )
 
         # All 3 jobs fail → 0 extracted, 3 errors counted, loop breaks to avoid
         # infinite re-processing of the same unextracted records.
@@ -339,44 +371,3 @@ class TestExtractJobsLoop:
         with db_manager.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM jobs WHERE extracted=1").fetchone()[0]
         assert count == 0
-
-
-# ---------------------------------------------------------------------------
-# _db_writer_thread
-# ---------------------------------------------------------------------------
-
-
-class TestDbWriterThread:
-    def test_processes_batch_and_exits_on_sentinel(self, db_manager):
-        job_id = _insert_preprocessed_job(db_manager, job_id_override=9001)
-        q = queue.Queue()
-        error_event = threading.Event()
-        q.put([(job_id, VALID_EXTRACTION)])
-        q.put(None)
-
-        t = threading.Thread(target=_db_writer_thread, args=(db_manager, q, error_event))
-        t.start()
-        t.join(timeout=5)
-
-        assert not t.is_alive()
-        assert not error_event.is_set()
-        with db_manager.get_connection() as conn:
-            row = conn.execute("SELECT extracted FROM jobs WHERE id=?", (job_id,)).fetchone()
-        assert row["extracted"] == 1
-
-    def test_sets_error_event_on_db_exception(self, db_manager):
-        q = queue.Queue()
-        error_event = threading.Event()
-
-        bad_db = MagicMock()
-        bad_db.update_extraction_batch.side_effect = Exception("DB exploded")
-
-        q.put([(999, VALID_EXTRACTION)])
-        q.put(None)
-
-        t = threading.Thread(target=_db_writer_thread, args=(bad_db, q, error_event))
-        t.start()
-        t.join(timeout=5)
-
-        assert not t.is_alive()
-        assert error_event.is_set()

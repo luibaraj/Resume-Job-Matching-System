@@ -1,9 +1,9 @@
+import asyncio
 import json
 import logging
 import os
-import queue
-import threading
 
+import jsonschema
 from google import genai
 
 from src.utils import setup_logging
@@ -82,51 +82,23 @@ EXTRACTION_JSON_SCHEMA = {
 }
 
 
-def _db_writer_thread(db, write_queue: queue.Queue,
-                      writer_error: threading.Event) -> None:
-    """Background thread that drains write_queue and flushes batches to DB.
-
-    Runs until it receives the sentinel value None.
-    Sets writer_error on any DB exception and drains remaining items so
-    the main thread's writer.join() never deadlocks.
-    """
-    while True:
-        item = write_queue.get()
-        if item is None:
-            write_queue.task_done()
-            break
-        try:
-            db.update_extraction_batch(item)
-        except Exception as e:
-            writer_error.set()
-            logging.getLogger("db_writer").error("DB write failed: %s", e, exc_info=True)
-            write_queue.task_done()
-            while True:
-                try:
-                    leftover = write_queue.get_nowait()
-                    write_queue.task_done()
-                    if leftover is None:
-                        break
-                except queue.Empty:
-                    break
-            return
-        else:
-            write_queue.task_done()
-
-
-def extract_job(record: tuple[int, str | None, str], client, model_id: str) -> tuple[int, dict] | None:
-    """Run extraction on a single job record.
+async def _extract_job_async(
+    record: tuple[int, str | None, str],
+    semaphore: asyncio.Semaphore,
+    client,
+    model_id: str,
+) -> tuple[int, dict] | None:
+    """Run extraction on a single job record asynchronously.
 
     Args:
         record: (job_id, cleaned_description, title)
+        semaphore: Semaphore to limit concurrent in-flight requests
         client: Gemini genai.Client instance
         model_id: Gemini model ID (e.g. "gemini-2.5-flash")
 
     Returns:
         (job_id, extracted_dict) on success, None on any failure
     """
-    import jsonschema
-
     logger = logging.getLogger("extract_job")
     job_id, cleaned_description, title = record
 
@@ -136,28 +108,61 @@ def extract_job(record: tuple[int, str | None, str], client, model_id: str) -> t
 
     prompt = EXTRACTION_SYSTEM_PROMPT + "\n\n" + SKELETON_TEMPLATE.replace("{text}", cleaned_description)
 
+    # Initialize content for safe debug logging in except blocks
+    content = "<not yet received>"
+
+    logger.debug(
+        "Job %d (%s): sending prompt (%d chars) to Gemini",
+        job_id, title or "no title", len(prompt)
+    )
+
     try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.0,
-                response_mime_type="application/json",
-            ),
-        )
+        async with semaphore:
+            response = await client.aio.models.generate_content(
+                model=model_id,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            )
         content = response.text
         parsed = json.loads(content)
         jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
         return (job_id, parsed)
     except json.JSONDecodeError as e:
-        logger.warning("Job %d: invalid JSON: %s", job_id, e)
+        logger.warning("Job %d: invalid JSON from Gemini: %s", job_id, e)
+        logger.debug("Job %d: raw Gemini response:\n%s", job_id, content)
         return None
     except jsonschema.ValidationError as e:
-        logger.warning("Job %d: schema validation failed: %s", job_id, e.message)
+        logger.warning(
+            "Job %d: schema validation failed — field: %s, message: %s",
+            job_id,
+            " -> ".join(str(p) for p in e.absolute_path) or "(root)",
+            e.message,
+        )
+        logger.debug("Job %d: raw Gemini response:\n%s", job_id, content)
         return None
     except Exception as e:
-        logger.warning("Job %d: extraction failed: %s", job_id, e)
+        logger.warning("Job %d: extraction failed (%s): %s", job_id, type(e).__name__, e)
+        logger.debug("Job %d: raw Gemini response (if any):\n%s", job_id, content)
         return None
+
+
+async def _extract_chunk_async(records, semaphore, client, model_id):
+    """Run extraction on a chunk of records concurrently.
+
+    Args:
+        records: List of (job_id, cleaned_description, title) tuples
+        semaphore: Semaphore to limit concurrent in-flight requests
+        client: Gemini genai.Client instance
+        model_id: Gemini model ID
+
+    Returns:
+        List of (job_id, extracted_dict) results or None for each
+    """
+    tasks = [_extract_job_async(r, semaphore, client, model_id) for r in records]
+    return await asyncio.gather(*tasks)
 
 
 def extract_jobs(
@@ -167,11 +172,13 @@ def extract_jobs(
     api_key: str,
     model_id: str,
     max_retries: int = 2,
+    concurrency: int = 10,
 ) -> tuple[int, int]:
     """Run extraction over all preprocessed, unextracted jobs in chunked batches.
 
     Mirrors the offset-0 pattern from preprocessing: committed rows drop out of
     WHERE extracted=0, so re-querying from offset 0 correctly returns the next batch.
+    Uses async/await with asyncio.gather to run API calls concurrently per chunk.
 
     Args:
         db: DatabaseManager instance
@@ -180,6 +187,7 @@ def extract_jobs(
         api_key: Google API key for Gemini
         model_id: Gemini model ID (e.g. "gemini-2.5-flash")
         max_retries: Max retries for failed records per chunk
+        concurrency: Max number of concurrent in-flight Gemini requests (default: 10)
 
     Returns:
         Tuple of (processed_count, error_count)
@@ -188,20 +196,11 @@ def extract_jobs(
     logger = setup_logging(log_level=log_level, name="extract_jobs")
 
     client = genai.Client(api_key=api_key)
-    logger.info("Gemini client initialized with model %s", model_id)
+    logger.info("Gemini client initialized with model %s (concurrency: %d)", model_id, concurrency)
+    semaphore = asyncio.Semaphore(concurrency)
 
     total_processed = 0
     total_errors = 0
-
-    write_queue: queue.Queue = queue.Queue(maxsize=5)
-    writer_error = threading.Event()
-    writer = threading.Thread(
-        target=_db_writer_thread,
-        args=(db, write_queue, writer_error),
-        daemon=True,
-        name="db-writer",
-    )
-    writer.start()
 
     while True:
         records = db.get_unextracted_jobs_chunked(chunk_size, 0)
@@ -210,7 +209,7 @@ def extract_jobs(
 
         logger.info("Processing chunk: %d records", len(records))
 
-        results = [extract_job(r, client, model_id) for r in records]
+        results = list(asyncio.run(_extract_chunk_async(records, semaphore, client, model_id)))
         successes = [r for r in results if r is not None]
         errors_in_chunk = len(records) - len(successes)
 
@@ -228,7 +227,7 @@ def extract_jobs(
                 len(missing_ids), attempt, max_retries, sorted(missing_ids),
             )
             records_to_retry = [r for r in records if r[0] in missing_ids]
-            retry_results = [extract_job(r, client, model_id) for r in records_to_retry]
+            retry_results = list(asyncio.run(_extract_chunk_async(records_to_retry, semaphore, client, model_id)))
             retry_successes = [r for r in retry_results if r is not None]
             successes.extend(retry_successes)
             output_ids = {r[0] for r in successes}
@@ -241,12 +240,12 @@ def extract_jobs(
             )
 
         if successes:
-            if writer_error.is_set():
-                logger.error("DB writer thread failed; stopping extraction.")
+            try:
+                db.update_extraction_batch(successes)
+            except Exception as e:
+                logger.error("DB write failed; stopping extraction: %s", e, exc_info=True)
                 total_errors += errors_in_chunk
                 break
-            write_queue.put(successes)
-            db.mark_jobs_extracted([job_id for job_id, _ in successes])
         else:
             # No progress — all records failed. Log and stop to avoid infinite loop.
             logger.error(
@@ -259,11 +258,6 @@ def extract_jobs(
         total_processed += len(successes)
         total_errors += errors_in_chunk
         logger.info("Chunk complete: %d extracted, %d errors", len(successes), errors_in_chunk)
-
-    write_queue.put(None)
-    writer.join()
-    if writer_error.is_set():
-        logger.error("DB writer thread raised an exception during drain.")
 
     logger.info("Extraction complete: %d extracted, %d errors", total_processed, total_errors)
     return total_processed, total_errors
@@ -298,6 +292,7 @@ def main() -> None:
             api_key=config.google_api_key,
             model_id=config.extraction_model_id,
             max_retries=config.extraction_max_retries,
+            concurrency=config.extraction_concurrency,
         )
         db.finish_pipeline_run(run_id, "success", jobs_processed=processed, jobs_skipped=errors)
         logger.info("Extraction step completed successfully")

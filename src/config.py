@@ -57,6 +57,9 @@ class Config:
     extraction_max_retries: int = field(
         default_factory=lambda: int(os.environ.get("EXTRACTION_MAX_RETRIES", "2"))
     )
+    extraction_concurrency: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_CONCURRENCY", "10"))
+    )
 
     # Embedding
     embedding_model_id: str = field(
@@ -159,6 +162,8 @@ def load_config() -> Config:
         raise ValueError("EXTRACTION_CHUNK_SIZE must be >= 1")
     if config.extraction_max_retries < 0:
         raise ValueError("EXTRACTION_MAX_RETRIES must be >= 0")
+    if config.extraction_concurrency < 1:
+        raise ValueError("EXTRACTION_CONCURRENCY must be >= 1")
     if config.embedding_chunk_size < 1:
         raise ValueError("EMBEDDING_CHUNK_SIZE must be >= 1")
     if config.embedding_batch_size < 1:
