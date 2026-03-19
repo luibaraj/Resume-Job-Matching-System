@@ -2,8 +2,11 @@ import asyncio
 import json
 import logging
 import os
+import re
+from pathlib import Path
 
 import jsonschema
+from dotenv import load_dotenv
 from google import genai
 
 from src.utils import setup_logging
@@ -82,12 +85,91 @@ EXTRACTION_JSON_SCHEMA = {
 }
 
 
+def _repair_json(raw: str) -> dict | None:
+    """Attempt to parse and repair a potentially malformed JSON string.
+
+    Strategies applied in order:
+    1. Strip markdown code fences if present (```json ... ```)
+    2. Locate and extract the first complete JSON object by bracket matching
+    3. If bracket extraction fails to parse, attempt missing-comma repair and retry
+
+    Args:
+        raw: Raw response text from Gemini
+
+    Returns:
+        Parsed dict on success, None if all repair strategies fail
+    """
+    logger = logging.getLogger("repair_json")
+
+    # Strategy 1: Strip markdown fences
+    text = raw.strip()
+    if text.startswith("```json"):
+        text = text[7:].lstrip()
+    if text.startswith("```"):
+        text = text[3:].lstrip()
+    if text.endswith("```"):
+        text = text[:-3].rstrip()
+
+    # Strategy 2: Extract first complete JSON object by bracket scan
+    brace_start = text.find("{")
+    if brace_start != -1:
+        depth = 0
+        in_string = False
+        escape_next = False
+
+        for i in range(brace_start, len(text)):
+            char = text[i]
+
+            if escape_next:
+                escape_next = False
+                continue
+
+            if char == "\\":
+                escape_next = True
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                continue
+
+            if not in_string:
+                if char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        # Found complete object
+                        candidate = text[brace_start : i + 1]
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            logger.debug("Bracket extraction produced unparseable JSON: %s", candidate[:100])
+                            break
+
+    # Strategy 3: Comma repair — fix missing commas between fields
+    # Pattern: closing delimiter (}, ], or ") followed by an opening quote (for next field)
+    # This catches: }{"key" -> },"key" or ]"key" -> ],"key"
+    text_for_repair = raw.strip()
+    if text_for_repair.startswith("```"):
+        text_for_repair = text_for_repair.split("```", 2)[1] if "```" in text_for_repair else text_for_repair
+
+    repaired = re.sub(r'([}\]"])\s*\n?\s*(")', r"\1,\2", text_for_repair)
+    if repaired != text_for_repair:
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            logger.debug("Comma repair failed to produce valid JSON")
+
+    return None
+
+
 async def _extract_job_async(
     record: tuple[int, str | None, str],
     semaphore: asyncio.Semaphore,
     client,
     model_id: str,
-) -> tuple[int, dict] | None:
+    max_output_tokens: int = 1024,
+) -> tuple[int, dict] | tuple[int, None, str, str]:
     """Run extraction on a single job record asynchronously.
 
     Args:
@@ -97,14 +179,15 @@ async def _extract_job_async(
         model_id: Gemini model ID (e.g. "gemini-2.5-flash")
 
     Returns:
-        (job_id, extracted_dict) on success, None on any failure
+        (job_id, extracted_dict) on success
+        (job_id, None, error_type, error_message) on failure
     """
     logger = logging.getLogger("extract_job")
     job_id, cleaned_description, title = record
 
     if not cleaned_description:
         logger.warning("Job %d has no cleaned_description, skipping", job_id)
-        return None
+        return (job_id, None, "missing_description", "No cleaned_description available")
 
     prompt = EXTRACTION_SYSTEM_PROMPT + "\n\n" + SKELETON_TEMPLATE.replace("{text}", cleaned_description)
 
@@ -124,48 +207,67 @@ async def _extract_job_async(
                 config=genai.types.GenerateContentConfig(
                     temperature=0.0,
                     response_mime_type="application/json",
+                    max_output_tokens=max_output_tokens,
                 ),
             )
         content = response.text
-        parsed = json.loads(content)
+
+        # Check if model was cut off mid-output
+        if response.candidates and response.candidates[0].finish_reason == "MAX_TOKENS":
+            logger.warning("Job %d: response truncated (MAX_TOKENS), attempting repair anyway", job_id)
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            logger.debug("Job %d: direct parse failed, attempting repair", job_id)
+            parsed = _repair_json(content)
+            if parsed is None:
+                logger.warning("Job %d: JSON repair failed", job_id)
+                logger.debug("Job %d: raw response:\n%s", job_id, content)
+                return (job_id, None, "json_parse_error", "Failed to parse and repair JSON from Gemini")
+            logger.info("Job %d: JSON repaired successfully", job_id)
+
         jsonschema.validate(parsed, EXTRACTION_JSON_SCHEMA)
         return (job_id, parsed)
     except json.JSONDecodeError as e:
         logger.warning("Job %d: invalid JSON from Gemini: %s", job_id, e)
         logger.debug("Job %d: raw Gemini response:\n%s", job_id, content)
-        return None
+        return (job_id, None, "json_parse_error", str(e))
     except jsonschema.ValidationError as e:
+        error_msg = f"Field: {' -> '.join(str(p) for p in e.absolute_path) or '(root)'}, Message: {e.message}"
         logger.warning(
-            "Job %d: schema validation failed — field: %s, message: %s",
+            "Job %d: schema validation failed — %s",
             job_id,
-            " -> ".join(str(p) for p in e.absolute_path) or "(root)",
-            e.message,
+            error_msg,
         )
         logger.debug("Job %d: raw Gemini response:\n%s", job_id, content)
-        return None
+        return (job_id, None, "schema_validation_error", error_msg)
     except Exception as e:
         logger.warning("Job %d: extraction failed (%s): %s", job_id, type(e).__name__, e)
         logger.debug("Job %d: raw Gemini response (if any):\n%s", job_id, content)
-        return None
+        return (job_id, None, "api_error", f"{type(e).__name__}: {str(e)}")
 
 
-async def _extract_chunk_async(records, semaphore, client, model_id):
+async def _extract_chunk_async(records, concurrency, client, model_id, max_output_tokens):
     """Run extraction on a chunk of records concurrently.
 
     Args:
         records: List of (job_id, cleaned_description, title) tuples
-        semaphore: Semaphore to limit concurrent in-flight requests
+        concurrency: Max number of concurrent in-flight requests
         client: Gemini genai.Client instance
         model_id: Gemini model ID
+        max_output_tokens: Max tokens in Gemini response
 
     Returns:
-        List of (job_id, extracted_dict) results or None for each
+        List of results: (job_id, extracted_dict) on success, or
+        (job_id, None, error_type, error_message) on failure
     """
-    tasks = [_extract_job_async(r, semaphore, client, model_id) for r in records]
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [_extract_job_async(r, semaphore, client, model_id, max_output_tokens) for r in records]
     return await asyncio.gather(*tasks)
 
 
-def extract_jobs(
+async def _extract_jobs_async(
     db,
     run_id: int,
     chunk_size: int,
@@ -173,6 +275,7 @@ def extract_jobs(
     model_id: str,
     max_retries: int = 2,
     concurrency: int = 10,
+    max_output_tokens: int = 1024,
 ) -> tuple[int, int]:
     """Run extraction over all preprocessed, unextracted jobs in chunked batches.
 
@@ -188,6 +291,7 @@ def extract_jobs(
         model_id: Gemini model ID (e.g. "gemini-2.5-flash")
         max_retries: Max retries for failed records per chunk
         concurrency: Max number of concurrent in-flight Gemini requests (default: 10)
+        max_output_tokens: Max tokens in Gemini response (default: 1024)
 
     Returns:
         Tuple of (processed_count, error_count)
@@ -197,7 +301,6 @@ def extract_jobs(
 
     client = genai.Client(api_key=api_key)
     logger.info("Gemini client initialized with model %s (concurrency: %d)", model_id, concurrency)
-    semaphore = asyncio.Semaphore(concurrency)
 
     total_processed = 0
     total_errors = 0
@@ -209,9 +312,12 @@ def extract_jobs(
 
         logger.info("Processing chunk: %d records", len(records))
 
-        results = list(asyncio.run(_extract_chunk_async(records, semaphore, client, model_id)))
-        successes = [r for r in results if r is not None]
+        results = list(await _extract_chunk_async(records, concurrency, client, model_id, max_output_tokens))
+        successes = [r for r in results if len(r) == 2 and r[1] is not None]
         errors_in_chunk = len(records) - len(successes)
+
+        # Accumulate all results (both successes and failures) for error persistence
+        all_results = results.copy()
 
         # Retry failed records
         input_ids = {r[0] for r in records}
@@ -222,14 +328,17 @@ def extract_jobs(
             if not missing_ids:
                 break
 
+            delay = 2.0 ** attempt  # 2s, 4s, 8s ...
             logger.warning(
-                "%d record(s) missing (attempt %d/%d), retrying IDs: %s",
-                len(missing_ids), attempt, max_retries, sorted(missing_ids),
+                "%d record(s) missing (attempt %d/%d), sleeping %.1fs, retrying IDs: %s",
+                len(missing_ids), attempt, max_retries, delay, sorted(missing_ids),
             )
+            await asyncio.sleep(delay)
             records_to_retry = [r for r in records if r[0] in missing_ids]
-            retry_results = list(asyncio.run(_extract_chunk_async(records_to_retry, semaphore, client, model_id)))
-            retry_successes = [r for r in retry_results if r is not None]
+            retry_results = list(await _extract_chunk_async(records_to_retry, concurrency, client, model_id, max_output_tokens))
+            retry_successes = [r for r in retry_results if len(r) == 2 and r[1] is not None]
             successes.extend(retry_successes)
+            all_results.extend(retry_results)
             output_ids = {r[0] for r in successes}
             missing_ids = input_ids - output_ids
 
@@ -238,6 +347,19 @@ def extract_jobs(
                 "%d record(s) permanently failed after %d retries: %s",
                 len(missing_ids), max_retries, sorted(missing_ids),
             )
+
+        # Write all errors to DB (both transient during retries and permanent failures)
+        errors_to_write = []
+        for r in all_results:
+            if len(r) == 4 and r[1] is None:
+                job_id, _, error_type, error_message = r
+                errors_to_write.append((job_id, error_type, error_message, max_retries + 1))
+
+        if errors_to_write:
+            try:
+                db.write_extraction_errors_batch(errors_to_write)
+            except Exception as e:
+                logger.error("Failed to write extraction errors to DB: %s", e)
 
         if successes:
             try:
@@ -263,6 +385,23 @@ def extract_jobs(
     return total_processed, total_errors
 
 
+def extract_jobs(
+    db,
+    run_id: int,
+    chunk_size: int,
+    api_key: str,
+    model_id: str,
+    max_retries: int = 2,
+    concurrency: int = 10,
+    max_output_tokens: int = 1024,
+) -> tuple[int, int]:
+    """Sync wrapper — runs entire extraction in one event loop to avoid
+    'Event loop is closed' errors when the Gemini client retries."""
+    return asyncio.run(
+        _extract_jobs_async(db, run_id, chunk_size, api_key, model_id, max_retries, concurrency, max_output_tokens)
+    )
+
+
 def main() -> None:
     """CLI entrypoint called by Docker container.
 
@@ -273,6 +412,10 @@ def main() -> None:
 
     from src.config import load_config
     from src.database import DatabaseManager
+
+    # Load environment variables from .env file
+    env_path = Path(__file__).parent.parent / ".env"
+    load_dotenv(env_path)
 
     logger = setup_logging(name="extraction_main")
     try:
@@ -293,6 +436,7 @@ def main() -> None:
             model_id=config.extraction_model_id,
             max_retries=config.extraction_max_retries,
             concurrency=config.extraction_concurrency,
+            max_output_tokens=config.extraction_max_output_tokens,
         )
         db.finish_pipeline_run(run_id, "success", jobs_processed=processed, jobs_skipped=errors)
         logger.info("Extraction step completed successfully")

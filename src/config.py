@@ -60,6 +60,9 @@ class Config:
     extraction_concurrency: int = field(
         default_factory=lambda: int(os.environ.get("EXTRACTION_CONCURRENCY", "10"))
     )
+    extraction_max_output_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("EXTRACTION_MAX_OUTPUT_TOKENS", "1024"))
+    )
 
     # Embedding
     embedding_model_id: str = field(
@@ -164,6 +167,8 @@ def load_config() -> Config:
         raise ValueError("EXTRACTION_MAX_RETRIES must be >= 0")
     if config.extraction_concurrency < 1:
         raise ValueError("EXTRACTION_CONCURRENCY must be >= 1")
+    if config.extraction_max_output_tokens < 1:
+        raise ValueError("EXTRACTION_MAX_OUTPUT_TOKENS must be >= 1")
     if config.embedding_chunk_size < 1:
         raise ValueError("EMBEDDING_CHUNK_SIZE must be >= 1")
     if config.embedding_batch_size < 1:

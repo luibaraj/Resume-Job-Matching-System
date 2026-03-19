@@ -152,6 +152,18 @@ class DatabaseManager:
                     value       REAL    NOT NULL,
                     computed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
                 );
+
+                CREATE TABLE IF NOT EXISTS job_extraction_errors (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id        INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                    error_type    TEXT    NOT NULL,
+                    error_message TEXT,
+                    failed_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                    attempt_count INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_job_extraction_errors_job_id
+                    ON job_extraction_errors(job_id);
                 """
             )
             # Add is_us column for existing databases
@@ -184,6 +196,25 @@ class DatabaseManager:
                         );
                         CREATE INDEX IF NOT EXISTS idx_job_summaries_job_id ON job_summaries(job_id);
                         CREATE INDEX IF NOT EXISTS idx_job_summaries_passed_eval ON job_summaries(passed_eval);
+                        """
+                    )
+            except sqlite3.OperationalError:
+                pass  # table already exists
+            # Create job_extraction_errors table for existing databases
+            try:
+                with self.get_connection() as conn:
+                    conn.executescript(
+                        """
+                        CREATE TABLE IF NOT EXISTS job_extraction_errors (
+                            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                            job_id        INTEGER NOT NULL UNIQUE REFERENCES jobs(id),
+                            error_type    TEXT    NOT NULL,
+                            error_message TEXT,
+                            failed_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                            attempt_count INTEGER NOT NULL
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_job_extraction_errors_job_id
+                            ON job_extraction_errors(job_id);
                         """
                     )
             except sqlite3.OperationalError:
@@ -454,6 +485,8 @@ class DatabaseManager:
     def update_extraction_batch(self, updates: list[tuple[int, dict]]) -> None:
         """Write extraction results to job_extractions and set extracted=1 on jobs.
 
+        Also clears any stale error records for successfully extracted jobs.
+
         Args:
             updates: List of (job_id, extracted_dict) tuples where extracted_dict
                      matches EXTRACTION_JSON_SCHEMA structure.
@@ -491,6 +524,37 @@ class DatabaseManager:
             conn.executemany(
                 "UPDATE jobs SET extracted=1 WHERE id=?",
                 [(job_id,) for job_id in job_ids],
+            )
+            # Clear any stale error records for successfully extracted jobs
+            conn.executemany(
+                "DELETE FROM job_extraction_errors WHERE job_id=?",
+                [(job_id,) for job_id in job_ids],
+            )
+
+    def write_extraction_errors_batch(
+        self,
+        errors: list[tuple[int, str, str, int]],
+    ) -> None:
+        """Persist permanent extraction failures to job_extraction_errors.
+
+        Uses INSERT OR REPLACE so that re-runs overwrite stale error rows
+        for the same job_id (UNIQUE constraint).
+
+        Args:
+            errors: List of (job_id, error_type, error_message, attempt_count) tuples
+                   where error_type is one of: "missing_description", "json_parse_error",
+                   "schema_validation_error", "max_tokens_truncation", "api_error"
+        """
+        if not errors:
+            return
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO job_extraction_errors
+                    (job_id, error_type, error_message, attempt_count)
+                VALUES (?, ?, ?, ?)
+                """,
+                errors,
             )
 
     def mark_jobs_extracted(self, job_ids: list[int]) -> None:
