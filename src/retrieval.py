@@ -37,6 +37,7 @@ def build_collection(
     conn: sqlite3.Connection,
     chroma_client: chromadb.PersistentClient,
     collection_name: str = DEFAULT_COLLECTION_NAME,
+    ef_construction: int = 100,
 ) -> chromadb.Collection:
     """
     Load embedded jobs from SQLite and upsert them into a Chroma collection.
@@ -50,6 +51,9 @@ def build_collection(
         conn: An open sqlite3.Connection to the jobs database.
         chroma_client: A chromadb.PersistentClient instance.
         collection_name: Name of the Chroma collection. Defaults to "jobs".
+        ef_construction: HNSW construction parameter controlling index build quality.
+            Higher values (e.g., 200) produce better quality indices at the cost of slower build.
+            Defaults to 100.
 
     Returns:
         The chromadb.Collection object (either newly created or retrieved).
@@ -59,7 +63,10 @@ def build_collection(
         ValueError: If embeddings cannot be deserialized (wrong size, corrupted blob).
     """
     conn.row_factory = sqlite3.Row
-    collection = chroma_client.get_or_create_collection(name=collection_name)
+    collection = chroma_client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw_construction": ef_construction},
+    )
 
     cursor = conn.cursor()
     cursor.execute(
@@ -121,6 +128,7 @@ def query_collection(
     collection: chromadb.Collection,
     query_embedding: np.ndarray,
     top_k: int = 10,
+    ef: int = 10,
 ) -> list[JobResult]:
     """
     Query a Chroma collection for the most similar jobs using dense vectors.
@@ -129,6 +137,8 @@ def query_collection(
         collection: A chromadb.Collection instance.
         query_embedding: A 1-D numpy array of shape (EMBEDDING_DIM,) and dtype float32.
         top_k: Number of top results to return. Defaults to 10.
+        ef: HNSW search parameter controlling query recall. Higher values (e.g., 50)
+            produce more accurate results at the cost of slower queries. Defaults to 10.
 
     Returns:
         A list of JobResult dicts, ordered by ascending distance (most similar first).
@@ -141,6 +151,7 @@ def query_collection(
             f"Expected query_embedding shape ({EMBEDDING_DIM},), got {query_embedding.shape}"
         )
 
+    collection.modify(metadata={"hnsw:ef": ef})
     result = collection.query(
         query_embeddings=[query_embedding.tolist()],
         n_results=top_k,

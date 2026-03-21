@@ -23,6 +23,8 @@ from config import (
     CHROMA_COLLECTION_NAME,
     CHROMA_DEFAULT_DIR,
     DB_DEFAULT_PATH,
+    HNSW_EF,
+    HNSW_EF_CONSTRUCTION,
     RETRIEVE_TOP_K,
 )
 from embedding import create_client, embed_batch
@@ -165,7 +167,9 @@ def main() -> None:
         conn = sqlite3.connect(db_path)
         try:
             logging.info("Building ChromaDB collection from embeddings...")
-            collection = build_collection(conn, chroma_client, CHROMA_COLLECTION_NAME)
+            collection = build_collection(
+                conn, chroma_client, CHROMA_COLLECTION_NAME, ef_construction=HNSW_EF_CONSTRUCTION
+            )
             logging.info(f"Collection ready with {collection.count()} jobs indexed.")
 
             # Sanity check: ensure we have embedded jobs
@@ -196,7 +200,7 @@ def main() -> None:
             # Query collection
             logging.info(f"Querying for top {RETRIEVE_TOP_K} matches...")
             results = query_collection(
-                collection, query_embedding, top_k=RETRIEVE_TOP_K
+                collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF
             )
 
             # Output results

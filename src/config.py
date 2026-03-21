@@ -22,3 +22,5 @@ CHROMA_DEFAULT_DIR: str = "data/chroma"
 
 # Retrieval
 RETRIEVE_TOP_K: int = 10
+HNSW_EF_CONSTRUCTION: int = 400  # HNSW index build quality
+HNSW_EF: int = 400                # HNSW query recall

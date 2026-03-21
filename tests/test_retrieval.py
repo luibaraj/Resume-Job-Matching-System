@@ -225,6 +225,14 @@ class TestBuildCollection:
         assert isinstance(collection, chromadb.Collection)
         conn.close()
 
+    def test_ef_construction_stored_in_metadata(self, tmp_db, tmp_chroma):
+        """Verify that ef_construction parameter is stored in collection metadata."""
+        conn = sqlite3.connect(tmp_db)
+        collection = build_collection(conn, tmp_chroma, ef_construction=200)
+
+        assert collection.metadata.get("hnsw_construction") == 200
+        conn.close()
+
 
 class TestQueryCollection:
     """Tests for query_collection function."""
@@ -285,3 +293,10 @@ class TestQueryCollection:
 
         assert len(results_1) == 1
         assert len(results_2) == 2
+
+    def test_ef_set_on_collection(self, populated_collection):
+        """Verify that ef parameter is set on the collection before querying."""
+        query_embedding = np.ones(EMBEDDING_DIM, dtype=np.float32)
+        query_collection(populated_collection, query_embedding, top_k=1, ef=50)
+
+        assert populated_collection.metadata.get("hnsw:ef") == 50
