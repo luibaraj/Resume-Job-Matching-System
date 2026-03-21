@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.config import DB_DEFAULT_PATH
 from src.db_utils import add_column_if_missing
 from src.preprocess import preprocess_description
 
@@ -80,7 +81,7 @@ def run_preprocessing(db_path: str) -> None:
 
 def main():
     load_dotenv()
-    db_path = os.getenv("DB_PATH", "data/jobs.db")
+    db_path = os.getenv("DB_PATH", DB_DEFAULT_PATH)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     run_preprocessing(db_path)
 

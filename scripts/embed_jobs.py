@@ -11,11 +11,11 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.config import DB_DEFAULT_PATH, VOYAGE_BATCH_SIZE
 from src.db_utils import add_column_if_missing
 from src.embedding import create_client, embed_batch, serialize_embedding
 
-DB_CHUNK_SIZE = 512      # rows fetched from SQLite per outer loop iteration
-VOYAGE_BATCH_SIZE = 128  # max texts per Voyage AI API call (hard limit)
+DB_CHUNK_SIZE = 512  # rows fetched from SQLite per outer loop iteration
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ def run_embedding(db_path: str, voyage_api_key: str) -> None:
 
 def main() -> None:
     load_dotenv()
-    db_path = os.getenv("DB_PATH", "data/jobs.db")
+    db_path = os.getenv("DB_PATH", DB_DEFAULT_PATH)
     voyage_api_key = os.getenv("VOYAGE_API_KEY", "")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 

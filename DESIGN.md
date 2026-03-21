@@ -13,3 +13,9 @@ These steps were curated based on the data quality report provided by inspect_ra
 3. Explain plain text from clean HTML.
 4. Normalize whitespace.
 5. Normalize unicode puncutation with ASCII equivalents.
+
+# Vector Database
+
+## Chroma
+
+The Chroma vector database is lightweight and great for prototyping, and it can still reach high recall accuracy if tuned properly.

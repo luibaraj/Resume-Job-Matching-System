@@ -10,6 +10,13 @@ import time
 import numpy as np
 import voyageai
 
+from config import (
+    EMBEDDING_DIM,
+    EMBED_MAX_RETRIES,
+    EMBED_RETRY_BASE_DELAY,
+    VOYAGE_MODEL,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,9 +41,9 @@ def create_client(api_key: str) -> voyageai.Client:
 def embed_batch(
     client: voyageai.Client,
     texts: list[str],
-    model: str = "voyage-3.5-lite",
-    max_retries: int = 3,
-    retry_base_delay: float = 2.0,
+    model: str = VOYAGE_MODEL,
+    max_retries: int = EMBED_MAX_RETRIES,
+    retry_base_delay: float = EMBED_RETRY_BASE_DELAY,
 ) -> list[np.ndarray]:
     """
     Embed a batch of texts using Voyage AI, returning one numpy array per text.
@@ -105,7 +112,7 @@ def serialize_embedding(embedding: np.ndarray) -> bytes:
     return embedding.astype(np.float32).tobytes()
 
 
-def deserialize_embedding(blob: bytes, dim: int = 1024) -> np.ndarray:
+def deserialize_embedding(blob: bytes, dim: int = EMBEDDING_DIM) -> np.ndarray:
     """
     Deserialize a SQLite BLOB back into a numpy float32 array.
 

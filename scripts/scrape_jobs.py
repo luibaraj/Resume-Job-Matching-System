@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 # Add project root to path so we can import from src/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.config import DB_DEFAULT_PATH
 from src.greenhouse_scraper import scrape_greenhouse_board, GreenhouseJob
 
 logging.basicConfig(
@@ -151,7 +152,7 @@ async def main():
     # Parse env vars
     raw_tokens = os.getenv("GREENHOUSE_BOARD_TOKENS", "")
     board_tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
-    db_path = os.getenv("DB_PATH", "data/jobs.db")
+    db_path = os.getenv("DB_PATH", DB_DEFAULT_PATH)
 
     if not board_tokens:
         logger.error("ERROR: GREENHOUSE_BOARD_TOKENS is not set or empty in .env")
