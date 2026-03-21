@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-# Add src to path for imports
+# Add src and scripts to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from preprocess import (
     _step1_unescape,
@@ -18,9 +19,8 @@ from preprocess import (
     _step4_normalize_whitespace,
     _step5_normalize_unicode_punctuation,
     preprocess_description,
-    run_preprocessing,
-    _add_column_if_missing,
 )
+from preprocess_jobs import run_preprocessing
 
 
 @pytest.fixture

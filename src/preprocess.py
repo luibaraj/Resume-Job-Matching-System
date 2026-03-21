@@ -12,13 +12,9 @@ Converts raw HTML-encoded job descriptions into clean plain text through a 5-ste
 import html
 import logging
 import re
-import sqlite3
-import time
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
-
-CHUNK_SIZE = 500
 
 # Unicode replacements for Step 5
 _UNICODE_TABLE = str.maketrans({
@@ -88,78 +84,3 @@ def preprocess_description(raw: str) -> str:
     text = _step4_normalize_whitespace(text)
     text = _step5_normalize_unicode_punctuation(text)
     return text
-
-
-def _add_column_if_missing(cursor: sqlite3.Cursor, table: str, column: str, col_type: str) -> None:
-    """Add a column to a table if it doesn't already exist."""
-    try:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-
-
-def run_preprocessing(db_path: str) -> None:
-    """
-    Preprocess all unprocessed job descriptions in the database.
-
-    Adds cleaned_description and preprocessed columns if missing, then processes
-    all jobs where preprocessed=0 in batches, updating the database.
-
-    Args:
-        db_path: Path to the SQLite database.
-    """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.cursor()
-
-        # Add columns if missing
-        _add_column_if_missing(cur, "jobs", "cleaned_description", "TEXT")
-        _add_column_if_missing(cur, "jobs", "preprocessed", "INTEGER DEFAULT 0")
-        conn.commit()
-
-        # Count total jobs to preprocess
-        cur.execute("SELECT COUNT(*) FROM jobs WHERE preprocessed=0")
-        total = cur.fetchone()[0]
-        logger.info(f"Jobs to preprocess: {total}")
-
-        processed = 0
-        start = time.monotonic()
-
-        while True:
-            # Always query at OFFSET 0; committed rows drop out of WHERE preprocessed=0
-            cur.execute(
-                "SELECT id, description FROM jobs WHERE preprocessed=0 LIMIT ? OFFSET 0",
-                (CHUNK_SIZE,),
-            )
-            batch = cur.fetchall()
-            if not batch:
-                break
-
-            # Preprocess each job
-            updates = [
-                (preprocess_description(row["description"]), row["id"])
-                for row in batch
-            ]
-
-            # Update database
-            cur.executemany(
-                "UPDATE jobs SET cleaned_description=?, preprocessed=1 WHERE id=?",
-                updates,
-            )
-            conn.commit()
-
-            # Log progress
-            processed += len(batch)
-            elapsed = time.monotonic() - start
-            logger.info(f"Processed {processed}/{total} ({elapsed:.1f}s elapsed)")
-
-        logger.info(f"Done. {processed} jobs preprocessed.")
-    finally:
-        conn.close()
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    run_preprocessing("data/jobs.db")
