@@ -50,5 +50,4 @@ data/*
 models/*
 !models/.gitkeep
 
-# Scratch
-/Scratch
+
