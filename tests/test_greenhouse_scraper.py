@@ -7,6 +7,11 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 import requests
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from src.greenhouse_scraper import (
     GreenhouseScraper,
     GreenhouseJob,
@@ -17,13 +22,12 @@ from src.greenhouse_scraper import (
 
 @pytest.fixture
 def sample_job_data():
-    """Sample job data from Greenhouse API."""
+    """Sample job data from Greenhouse API (new boards-api format)."""
     return {
         'id': 12345,
         'title': 'Software Engineer',
-        'location': 'San Francisco, CA',
+        'location': {'name': 'San Francisco, CA'},
         'internal_job_id': 9999,
-        'status': 'published',
         'content': 'We are looking for a Software Engineer...',
         'url': '/jobs/12345',
         'absolute_url': 'https://example.greenhouse.io/jobs/12345',
@@ -33,9 +37,7 @@ def sample_job_data():
             {
                 'id': 1,
                 'name': 'San Francisco',
-                'city': 'San Francisco',
-                'state': 'CA',
-                'country_code': 'US',
+                'location': 'San Francisco, CA, United States',
                 'primary': True,
             }
         ],
@@ -113,17 +115,10 @@ class TestGreenhouseScraper:
 
     def test_get_params(self, scraper):
         """Test building API parameters."""
-        params = scraper._get_params(offset=0)
+        params = scraper._get_params()
 
         assert params['content'] == 'true'
-        assert params['limit'] == 100
-        assert params['offset'] == 0
-
-    def test_get_params_with_offset(self, scraper):
-        """Test API parameters with offset."""
-        params = scraper._get_params(offset=100)
-
-        assert params['offset'] == 100
+        assert len(params) == 1  # Only content parameter
 
     def test_extract_location_with_office(self, scraper, sample_job_data):
         """Test location extraction with office data."""
@@ -150,12 +145,21 @@ class TestGreenhouseScraper:
         assert job.department == 'Engineering'
         assert job.job_type == 'Full-time'
 
-    def test_parse_job_missing_status(self, scraper, sample_job_data):
+    def test_parse_job_wrong_status(self, scraper, sample_job_data):
         """Test that jobs with wrong status are filtered."""
         sample_job_data['status'] = 'draft'
         job = scraper._parse_job(sample_job_data, 'published', None)
 
         assert job is None
+
+    def test_parse_job_no_status_field(self, scraper, sample_job_data):
+        """Test that jobs without status field (new API) are still parsed."""
+        # Ensure no status field is present (new API omits it)
+        sample_job_data.pop('status', None)
+        job = scraper._parse_job(sample_job_data, 'published', None)
+
+        assert job is not None
+        assert job.id == '12345'
 
     def test_parse_job_missing_required_fields(self, scraper):
         """Test that jobs with missing required fields are skipped."""
@@ -213,25 +217,7 @@ class TestGreenhouseScraper:
         assert len(jobs) == 1
         assert jobs[0].id == '12345'
         assert jobs[0].title == 'Software Engineer'
-
-    @patch('src.greenhouse_scraper.requests.Session.get')
-    def test_fetch_jobs_pagination(self, mock_get, scraper, sample_job_data):
-        """Test job fetching with pagination."""
-        # Create 150 jobs to trigger pagination
-        jobs_page1 = [sample_job_data] * 100
-        jobs_page2 = [sample_job_data] * 50
-
-        mock_response1 = MagicMock()
-        mock_response1.json.return_value = {'jobs': jobs_page1}
-        mock_response2 = MagicMock()
-        mock_response2.json.return_value = {'jobs': jobs_page2}
-
-        mock_get.side_effect = [mock_response1, mock_response2]
-
-        jobs = scraper.fetch_jobs()
-
-        assert len(jobs) == 150
-        assert mock_get.call_count == 2
+        assert mock_get.call_count == 1  # Single API call, no pagination
 
     @patch('src.greenhouse_scraper.requests.Session.get')
     def test_fetch_jobs_api_error(self, mock_get, scraper):

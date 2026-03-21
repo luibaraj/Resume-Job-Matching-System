@@ -7,6 +7,7 @@ anthropic>=0.25.0
 # HTTP
 requests==2.32.3
 urllib3==2.2.2
+python-dotenv>=1.0.0
 
 # Embeddings & Reranking
 sentence-transformers>=3.0.0

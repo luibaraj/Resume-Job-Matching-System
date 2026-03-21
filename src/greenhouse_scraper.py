@@ -54,8 +54,8 @@ class GreenhouseJob:
 class GreenhouseScraper:
     """Scrapes job listings from Greenhouse job boards."""
 
-    # Greenhouse API documentation: https://developers.greenhouse.io/job-board.html
-    BASE_URL = "https://api.greenhouse.io/v1/public/jobs"
+    # Greenhouse Job Board API: https://developers.greenhouse.io/job-board.html
+    BASE_URL = "https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
 
     def __init__(
         self,
@@ -91,12 +91,10 @@ class GreenhouseScraper:
         session.mount("https://", adapter)
         return session
 
-    def _get_params(self, offset: int = 0) -> Dict[str, Any]:
+    def _get_params(self) -> Dict[str, Any]:
         """Build query parameters for Greenhouse API."""
         return {
             'content': 'true',  # Include full job content
-            'limit': 100,       # Max per page
-            'offset': offset,
         }
 
     def fetch_jobs(
@@ -115,42 +113,31 @@ class GreenhouseScraper:
             List of GreenhouseJob objects
         """
         jobs = []
-        offset = 0
-        has_more = True
 
         logger.info(f"Starting Greenhouse scrape for board: {self.board_token}")
 
-        while has_more:
-            try:
-                params = self._get_params(offset)
-                response = self.session.get(
-                    self.BASE_URL,
-                    params=params,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
+        try:
+            url = self.BASE_URL.format(board_token=self.board_token)
+            response = self.session.get(
+                url,
+                params=self._get_params(),
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
 
-                data = response.json()
-                batch = data.get('jobs', [])
+            data = response.json()
+            batch = data.get('jobs', [])
 
-                if not batch:
-                    has_more = False
-                    break
+            for job_data in batch:
+                job = self._parse_job(job_data, status, updated_after)
+                if job:
+                    jobs.append(job)
 
-                for job_data in batch:
-                    job = self._parse_job(job_data, status, updated_after)
-                    if job:
-                        jobs.append(job)
+            logger.debug(f"Fetched {len(batch)} jobs from API, kept {len(jobs)} after filtering")
 
-                # Check if there are more pages
-                has_more = len(batch) == 100
-                offset += 100
-
-                logger.debug(f"Fetched {len(batch)} jobs, total so far: {len(jobs)}")
-
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching jobs from Greenhouse: {e}")
-                raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching jobs from Greenhouse: {e}")
+            raise
 
         logger.info(f"Successfully scraped {len(jobs)} jobs from Greenhouse")
         return jobs
@@ -173,8 +160,9 @@ class GreenhouseScraper:
             GreenhouseJob if valid and passes filters, None otherwise
         """
         try:
-            # Check status
-            if job_data.get('status') != status_filter:
+            # Check status (new API omits this field; all returned jobs are published)
+            status = job_data.get('status')
+            if status is not None and status != status_filter:
                 return None
 
             # Check updated_at filter
@@ -240,14 +228,21 @@ class GreenhouseScraper:
 
         Greenhouse can have multiple offices; prioritize primary office.
         """
+        # Prefer top-level location field (new API), fall back to offices list
+        location_obj = job_data.get('location')
+        if location_obj and location_obj.get('name'):
+            return location_obj['name']
+
         offices = job_data.get('offices', [])
         if offices:
-            # Try to get primary office or first office
             primary = next((o for o in offices if o.get('primary')), offices[0])
+            # New API: offices have a 'location' string; old API had city/state/country_code
+            loc = primary.get('location') or primary.get('name', '')
+            if loc:
+                return loc
             city = primary.get('city', '')
             state = primary.get('state', '')
             country = primary.get('country_code', '')
-
             parts = [p for p in [city, state, country] if p]
             return ', '.join(parts) if parts else 'Remote'
 
