@@ -59,8 +59,8 @@ _SENIORITY_ENTRY_RE = re.compile(
 
 # ===== Years of experience patterns =====
 # Require "experience" or "years" to avoid matching dates/versions.
-# Dropped "X-Y years" pattern (too easily confused with date ranges).
 # Pattern: (1-2 digits)+ optional_whitespace years(?) optional("of experience" or just "experience")
+# Supports: "3+ years", "at least 5 years", "5 or more years", "3-5 years", "3–5 years", "2 years of X experience"
 
 _YEARS_PLUS_RE = re.compile(
     r"(?<!\d)(\d{1,2})\+\s*years?\b(?:\s+(?:of\s+)?experience)?",
@@ -74,6 +74,16 @@ _YEARS_AT_LEAST_RE = re.compile(
 
 _YEARS_OR_MORE_RE = re.compile(
     r"(?<!\d)(\d{1,2})\s+or\s+more\s+years?\b(?:\s+(?:of\s+)?experience)?",
+    re.IGNORECASE,
+)
+
+_YEARS_RANGE_RE = re.compile(
+    r"(?<!\d)(\d{1,2})\s*[-–]\s*\d{1,2}\s+years?\b(?:\s+(?:of\s+)?(?:in\s+)?(?:[\w\s]+?\s+)?experience)?",
+    re.IGNORECASE,
+)
+
+_YEARS_OF_EXPERIENCE_RE = re.compile(
+    r"(?<!\d)(\d{1,2})\s+years?\s+of\s+[\w\s]+?experience\b",
     re.IGNORECASE,
 )
 
@@ -163,7 +173,7 @@ def extract_years_experience(text: str) -> int:
 
     Collects all matches from all patterns; returns the minimum found value.
     Handles: "3+ years of experience", "at least 2 years of experience",
-    "5 or more years of experience".
+    "5 or more years of experience", "3-5 years of experience", "2 years of internship experience".
 
     Args:
         text: Cleaned plain-text job description.
@@ -175,7 +185,7 @@ def extract_years_experience(text: str) -> int:
         return YEARS_UNKNOWN
 
     found: list[int] = []
-    for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE):
+    for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE, _YEARS_RANGE_RE, _YEARS_OF_EXPERIENCE_RE):
         for match in pattern.finditer(text):
             val = int(match.group(1))
             found.append(val)
@@ -233,7 +243,7 @@ def extract_user_years_experience(resume_text: str) -> int:
     """
     Extract years of experience from resume text.
 
-    Scans the `== EXPERIENCE ==` section if present; falls back to full-text scan.
+    Scans the entire resume text for year patterns.
 
     Args:
         resume_text: Full resume text.
@@ -244,12 +254,9 @@ def extract_user_years_experience(resume_text: str) -> int:
     if not resume_text:
         return YEARS_UNKNOWN
 
-    section_match = _RESUME_EXPERIENCE_SECTION_RE.search(resume_text)
-    search_text = section_match.group(1) if section_match else resume_text
-
     found: list[int] = []
-    for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE):
-        for match in pattern.finditer(search_text):
+    for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE, _YEARS_RANGE_RE, _YEARS_OF_EXPERIENCE_RE):
+        for match in pattern.finditer(resume_text):
             found.append(int(match.group(1)))
 
     return min(found) if found else YEARS_UNKNOWN
@@ -308,7 +315,7 @@ def build_chroma_where_filter(
         conditions.append(
             {
                 "$or": [
-                    {"min_years_experience": {"$lte": user_years}},
+                    {"min_years_experience": {"$lt": user_years}},
                     {"min_years_experience": {"$eq": YEARS_UNKNOWN}},
                 ]
             }
@@ -372,6 +379,8 @@ def describe_chroma_filter(where_filter: Optional[dict]) -> str:
                             main_val = val
                     elif "$lte" in op_dict:
                         main_val = op_dict["$lte"]
+                    elif "$lt" in op_dict:
+                        main_val = op_dict["$lt"]
 
             # Format based on field type
             if field_name == "seniority_level" and main_val is not None:

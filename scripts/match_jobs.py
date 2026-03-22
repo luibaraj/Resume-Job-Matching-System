@@ -37,6 +37,7 @@ from regex_extraction import (
     extract_user_degree,
     extract_user_seniority,
     extract_user_years_experience,
+    extract_years_experience,
 )
 from retrieval import build_collection, query_collection
 from reranking import rerank_jobs
@@ -193,9 +194,16 @@ def write_results_markdown(results: list[dict], output_path: str = "matched_jobs
         title = job.get("title", "Unknown")
         board_token = job.get("board_token", "Unknown")
         url = job.get("source_url", "No URL")
+        description = job.get("cleaned_description", "")
 
         lines.append(f"## {i}. {title}")
         lines.append(f"- **Board Token:** `{board_token}`")
+
+        # Extract minimum years of experience if detected
+        min_years = extract_years_experience(description)
+        if min_years > 0:
+            lines.append(f"- **Min. Years of Experience:** {min_years}")
+
         lines.append(f"- **URL:** [{url}]({url})\n")
 
     with open(output_path, "w", encoding="utf-8") as f:

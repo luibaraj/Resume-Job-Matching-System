@@ -151,6 +151,10 @@ class TestExtractSeniorityFromTitle:
         """Senior takes priority when multiple signals exist in title."""
         assert extract_seniority_from_title("Senior or Mid-level Engineer") == SENIORITY_SENIOR
 
+    def test_senior_with_location_in_title(self):
+        """Senior title with location suffix is correctly identified."""
+        assert extract_seniority_from_title("Senior Customer Support Engineer - US West") == SENIORITY_SENIOR
+
 
 class TestExtractYearsExperience:
     """Test years of experience extraction from job descriptions."""
@@ -173,6 +177,12 @@ class TestExtractYearsExperience:
         assert extract_years_experience("5 or more years of experience required") == 5
         assert extract_years_experience("2 or more years experience") == 2
 
+    def test_x_years_of_y_experience_pattern(self):
+        """'X years of Y experience' is correctly extracted."""
+        assert extract_years_experience("2 years of internship experience") == 2
+        assert extract_years_experience("3 years of software development experience") == 3
+        assert extract_years_experience("1 year of professional experience") == 1
+
     def test_multiple_years_requirements_returns_minimum(self):
         """Multiple year requirements return the minimum."""
         assert extract_years_experience("3+ years Python, 5+ years data science") == 3
@@ -182,10 +192,21 @@ class TestExtractYearsExperience:
         assert extract_years_experience("") == YEARS_UNKNOWN
         assert extract_years_experience("Experience required (no specific years)") == YEARS_UNKNOWN
 
-    def test_range_pattern_not_matched(self):
-        """X-Y years range pattern is intentionally not matched."""
-        # This is to avoid confusion with date ranges like "2022-2024 years of experience"
-        assert extract_years_experience("2-5 years of experience") == YEARS_UNKNOWN
+    def test_range_pattern_with_hyphen(self):
+        """X-Y years range pattern is matched, extracting the lower bound."""
+        # Extracts the first number in the range
+        assert extract_years_experience("2-5 years of experience") == 2
+        assert extract_years_experience("3-7 years required") == 3
+
+    def test_range_pattern_with_en_dash(self):
+        """X–Y years range pattern with en-dash is matched."""
+        # Handles both hyphen and en-dash
+        assert extract_years_experience("3–5 years of experience building production-grade ML systems") == 3
+
+    def test_range_pattern_with_in_keyword(self):
+        """X-Y years in [role] pattern is matched."""
+        # Handles "X-Y years in [role/domain]"
+        assert extract_years_experience("Experience: 2-4 years in a technical support, sysadmin, or network-focused role.") == 2
 
     def test_version_number_not_matched(self):
         """Version numbers are not matched (e.g., Python 3.10)."""
@@ -260,6 +281,14 @@ Company A — Data Scientist Intern (2020-2022)
 - Worked on various projects
         """
         assert extract_user_years_experience(resume) == YEARS_UNKNOWN
+
+    def test_extract_x_years_of_y_experience_from_resume(self):
+        """'X years of Y experience' is extracted from resume."""
+        resume = """== SENIORITY LEVEL ==
+New Grad, Entry level
+2 years of internship experience
+        """
+        assert extract_user_years_experience(resume) == 2
 
     def test_multiple_years_in_experience_returns_minimum(self):
         """If multiple year counts in experience, return minimum."""
