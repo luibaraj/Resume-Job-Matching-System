@@ -192,6 +192,9 @@ class TestBuildCollection:
         assert "source_url" in metadata
         assert "board_token" in metadata
         assert "cleaned_description" in metadata
+        assert "required_degree" in metadata
+        assert "seniority_level" in metadata
+        assert "min_years_experience" in metadata
 
         assert metadata["title"] == "Senior Engineer"
         assert metadata["location"] == "San Francisco, CA"
@@ -276,6 +279,9 @@ class TestQueryCollection:
         assert "source_url" in result
         assert "board_token" in result
         assert "cleaned_description" in result
+        assert "required_degree" in result
+        assert "seniority_level" in result
+        assert "min_years_experience" in result
 
     def test_invalid_embedding_shape_raises(self, populated_collection):
         """Verify that an invalid embedding shape raises ValueError."""
@@ -300,3 +306,22 @@ class TestQueryCollection:
         query_collection(populated_collection, query_embedding, top_k=1, ef=50)
 
         assert populated_collection.metadata.get("hnsw:ef") == 50
+
+    def test_where_filter_parameter_accepted(self, populated_collection):
+        """Verify that where parameter is accepted without error."""
+        query_embedding = np.ones(EMBEDDING_DIM, dtype=np.float32)
+        where_filter = {"seniority_level": {"$eq": 1}}
+
+        results = query_collection(populated_collection, query_embedding, top_k=3, where=where_filter)
+
+        # Should return results (may be 0 if none match the filter, but no error)
+        assert isinstance(results, list)
+
+    def test_no_where_filter_returns_all(self, populated_collection):
+        """Verify that omitting where parameter returns unfiltered results."""
+        query_embedding = np.ones(EMBEDDING_DIM, dtype=np.float32)
+
+        results = query_collection(populated_collection, query_embedding, top_k=3)
+
+        # Should return all 3 results
+        assert len(results) == 3

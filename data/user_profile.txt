@@ -1,11 +1,12 @@
 == EDUCATION ==
 University of California, Santa Barbara
 Graduated 2025
-Degree: Statistics and Data Science, Mathematics
+Degree: Bachelor's of Science
+Major: Statistics and Data Science, Mathematics
 
 == SENIORITY LEVEL ==
-New Grad or Junior level
-Years of internship experience in data science
+New Grad, Entry level
+2 years of internship experience
 
 == EXPERIENCE ==
 
@@ -27,7 +28,7 @@ YouROK Corp — Data Scientist Intern (Mar 2024 - Sep 2024)
 - Tech Stack: Python, OpenAI API, Flask (REST API), React (JavaScript), PyTest
 
 Scripps Institution of Oceanography — Data Science Capstone Intern (Jan 2024 - Jun 2024)
-- Supported a PhD candidate's whale-call classification research by improving sensor data preparation steps to boost model performance.
+- Supported a researchers's whale-call classification research by improving sensor data preparation steps to boost model performance.
 - Benchmarked the optimized data-prep pipeline against a baseline CNN to validate improvements.
 - Measured and visualized key performance metrics to confirm model effectiveness.
 - Built an R Shiny dashboard visualizing spatial patterns in marine migration data to support conservation research.

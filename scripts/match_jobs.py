@@ -31,6 +31,13 @@ from config import (
     RERANK_TOP_N,
 )
 from embedding import create_client, embed_batch
+from regex_extraction import (
+    build_chroma_where_filter,
+    describe_chroma_filter,
+    extract_user_degree,
+    extract_user_seniority,
+    extract_user_years_experience,
+)
 from retrieval import build_collection, query_collection
 from reranking import rerank_jobs
 
@@ -58,6 +65,30 @@ def load_resume() -> str:
         sys.exit(1)
 
     return resume_text
+
+
+def extract_user_filters(resume_text: str):
+    """
+    Extract structured criteria from resume text and build a ChromaDB where filter.
+
+    Args:
+        resume_text: Full resume text from user_profile.txt.
+
+    Returns:
+        A ChromaDB where filter dict, or None if no criteria could be extracted.
+    """
+    user_degree = extract_user_degree(resume_text)
+    user_seniority = extract_user_seniority(resume_text)
+    user_years = extract_user_years_experience(resume_text)
+
+    logging.info(
+        "User profile — degree: %d, seniority: %d, years: %d",
+        user_degree,
+        user_seniority,
+        user_years,
+    )
+
+    return build_chroma_where_filter(user_degree, user_seniority, user_years)
 
 
 def _resume_hash(resume_text: str) -> str:
@@ -200,6 +231,10 @@ def main() -> None:
     resume_text = load_resume()
     logging.info(f"Loaded resume ({len(resume_text)} characters).")
 
+    # Extract user profile criteria for filtering
+    query_filter = extract_user_filters(resume_text)
+    logging.info("Applying filters: %s", describe_chroma_filter(query_filter))
+
     # Build Chroma client (never rebuild in non-interactive context)
     chroma_client = build_chroma_client(CHROMA_DEFAULT_DIR, rebuild=False)
 
@@ -249,7 +284,7 @@ def main() -> None:
             # Step 1: Dense retrieval — top 100 candidates
             logging.info(f"Querying for top {RETRIEVE_TOP_K} candidates...")
             candidates = query_collection(
-                collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF
+                collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF, where=query_filter
             )
 
             # Step 2: Rerank — top 10 results

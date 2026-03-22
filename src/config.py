@@ -28,3 +28,16 @@ HNSW_EF: int = 400                # HNSW query recall
 # Reranking
 COHERE_RERANK_MODEL: str = "rerank-english-v3.0"
 RERANK_TOP_N: int = 10
+
+# Metadata extraction
+DEGREE_UNKNOWN: int = 0
+DEGREE_BACHELOR: int = 1
+DEGREE_MASTER: int = 2
+DEGREE_PHD: int = 3
+
+SENIORITY_UNKNOWN: int = 0
+SENIORITY_ENTRY: int = 1
+SENIORITY_MID: int = 2
+SENIORITY_SENIOR: int = 3
+
+YEARS_UNKNOWN: int = -1
