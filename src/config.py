@@ -41,3 +41,15 @@ SENIORITY_MID: int = 2
 SENIORITY_SENIOR: int = 3
 
 YEARS_UNKNOWN: int = -1
+
+# Generation
+OLLAMA_MODEL: str = "llama3.2:3b-instruct-q4_K_M"
+GENERATION_TEMPERATURE: float = 0.7
+GENERATION_TOP_P: float = 0.9
+GENERATION_MAX_TOKENS: int = 150
+MAX_BATCH_SIZE: int = 10
+CORPUS_LIMITATION_MESSAGE: str = (
+    "No strongly matching jobs found in current corpus. "
+    "This indicates corpus limitations, not poor fit. "
+    "Recommend expanding job database or checking back later."
+)
