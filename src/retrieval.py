@@ -22,6 +22,7 @@ from config import (
 from embedding import deserialize_embedding
 from regex_extraction import (
     extract_degree_requirement,
+    extract_seniority_from_title,
     extract_seniority_level,
     extract_years_experience,
 )
@@ -118,7 +119,7 @@ def build_collection(
                     "board_token": row["board_token"] or "",
                     "cleaned_description": desc,
                     "required_degree": extract_degree_requirement(desc),
-                    "seniority_level": extract_seniority_level(desc),
+                    "seniority_level": extract_seniority_level(desc) or extract_seniority_from_title(row["title"] or ""),
                     "min_years_experience": extract_years_experience(desc),
                 }
             )

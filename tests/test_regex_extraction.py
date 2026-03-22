@@ -22,6 +22,7 @@ from regex_extraction import (
     YEARS_UNKNOWN,
     build_chroma_where_filter,
     extract_degree_requirement,
+    extract_seniority_from_title,
     extract_seniority_level,
     extract_user_degree,
     extract_user_seniority,
@@ -110,6 +111,45 @@ class TestExtractSeniorityLevel:
         """Mid takes priority when both are mentioned."""
         result = extract_seniority_level("Mid-level or entry-level position")
         assert result == SENIORITY_MID
+
+
+class TestExtractSeniorityFromTitle:
+    """Test seniority extraction from job title strings."""
+
+    def test_senior_title(self):
+        """Senior-level titles are correctly identified."""
+        assert extract_seniority_from_title("Senior Data Scientist") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("Sr. Software Engineer") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("Lead Machine Learning Engineer") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("Principal Engineer") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("Director of Data Science") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("Engineering Manager") == SENIORITY_SENIOR
+
+    def test_mid_title(self):
+        """Mid-level titles are correctly identified."""
+        assert extract_seniority_from_title("Mid-level Data Analyst") == SENIORITY_MID
+        assert extract_seniority_from_title("Intermediate Software Engineer") == SENIORITY_MID
+
+    def test_entry_title(self):
+        """Entry-level titles are correctly identified."""
+        assert extract_seniority_from_title("Junior Data Scientist") == SENIORITY_ENTRY
+        assert extract_seniority_from_title("Entry-level Software Engineer") == SENIORITY_ENTRY
+        assert extract_seniority_from_title("New Grad Software Engineer") == SENIORITY_ENTRY
+
+    def test_ambiguous_title_returns_unknown(self):
+        """Titles without seniority keywords return SENIORITY_UNKNOWN."""
+        assert extract_seniority_from_title("Data Scientist") == SENIORITY_UNKNOWN
+        assert extract_seniority_from_title("Software Engineer") == SENIORITY_UNKNOWN
+        assert extract_seniority_from_title("") == SENIORITY_UNKNOWN
+
+    def test_case_insensitive(self):
+        """Title matching is case-insensitive."""
+        assert extract_seniority_from_title("SENIOR DATA SCIENTIST") == SENIORITY_SENIOR
+        assert extract_seniority_from_title("junior engineer") == SENIORITY_ENTRY
+
+    def test_senior_takes_priority_in_title(self):
+        """Senior takes priority when multiple signals exist in title."""
+        assert extract_seniority_from_title("Senior or Mid-level Engineer") == SENIORITY_SENIOR
 
 
 class TestExtractYearsExperience:

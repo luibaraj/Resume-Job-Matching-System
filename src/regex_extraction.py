@@ -140,6 +140,23 @@ def extract_seniority_level(text: str) -> int:
     return SENIORITY_UNKNOWN
 
 
+def extract_seniority_from_title(title: str) -> int:
+    """
+    Extract seniority level from a job title string.
+
+    Delegates to extract_seniority_level, reusing the same regex patterns.
+    Intended as a fallback when the job description yields SENIORITY_UNKNOWN.
+
+    Args:
+        title: Raw job title string (e.g., "Senior Data Scientist").
+
+    Returns:
+        SENIORITY_SENIOR (3), SENIORITY_MID (2), SENIORITY_ENTRY (1),
+        or SENIORITY_UNKNOWN (0).
+    """
+    return extract_seniority_level(title)
+
+
 def extract_years_experience(text: str) -> int:
     """
     Extract minimum years of experience required from a job description.
