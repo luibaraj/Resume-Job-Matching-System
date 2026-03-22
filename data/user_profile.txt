@@ -1,3 +1,12 @@
+== EDUCATION ==
+University of California, Santa Barbara
+Graduated 2025
+Degree: Statistics and Data Science, Mathematics
+
+== SENIORITY LEVEL ==
+New Grad or Junior level
+Years of internship experience in data science
+
 == EXPERIENCE ==
 
 Materials Research Lab — Data Science Research Intern (Jan 2025 - Jun 2025)

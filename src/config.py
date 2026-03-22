@@ -21,6 +21,10 @@ CHROMA_COLLECTION_NAME: str = "jobs"
 CHROMA_DEFAULT_DIR: str = "data/chroma"
 
 # Retrieval
-RETRIEVE_TOP_K: int = 10
+RETRIEVE_TOP_K: int = 100
 HNSW_EF_CONSTRUCTION: int = 400  # HNSW index build quality
 HNSW_EF: int = 400                # HNSW query recall
+
+# Reranking
+COHERE_RERANK_MODEL: str = "rerank-english-v3.0"
+RERANK_TOP_N: int = 10
