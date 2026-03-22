@@ -12,7 +12,7 @@ google-genai>=1.0.0
 beautifulsoup4>=4.12.0
 
 # Vector Database
-chromadb>=0.4.0
+chromadb>=0.4.0,<=1.5.5
 
 # Reranking
 cohere>=5.0.0
@@ -22,3 +22,8 @@ pytest==8.3.2
 pytest-cov==5.0.0
 pytest-mock==3.14.0
 pytest-asyncio==0.24.0
+
+# NOTE: SwigPyPacked DeprecationWarning Suppression
+# Some transitive dependencies (via voyageai, chromadb, etc.) use SWIG-wrapped C extensions
+# that lack proper __module__ attributes, triggering a harmless deprecation warning in Python 3.11+.
+# This is suppressed globally in src/__init__.py. See: https://github.com/pytorch/ao/issues/2752
