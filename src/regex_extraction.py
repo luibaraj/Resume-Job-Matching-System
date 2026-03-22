@@ -233,7 +233,7 @@ def extract_user_years_experience(resume_text: str) -> int:
     """
     Extract years of experience from resume text.
 
-    Scans the `== EXPERIENCE ==` section only.
+    Scans the `== EXPERIENCE ==` section if present; falls back to full-text scan.
 
     Args:
         resume_text: Full resume text.
@@ -245,10 +245,7 @@ def extract_user_years_experience(resume_text: str) -> int:
         return YEARS_UNKNOWN
 
     section_match = _RESUME_EXPERIENCE_SECTION_RE.search(resume_text)
-    search_text = section_match.group(1) if section_match else ""
-
-    if not search_text:
-        return YEARS_UNKNOWN
+    search_text = section_match.group(1) if section_match else resume_text
 
     found: list[int] = []
     for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE):

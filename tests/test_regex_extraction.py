@@ -269,6 +269,14 @@ Company A — Data Scientist Intern (2020-2022)
         """
         assert extract_user_years_experience(resume) == 5
 
+    def test_fallback_to_full_text_when_no_experience_section(self):
+        """Falls back to full-text scan if == EXPERIENCE == section is missing."""
+        resume = """== EDUCATION ==
+B.S. in Computer Science
+Had 4+ years of internship experience during college
+        """
+        assert extract_user_years_experience(resume) == 4
+
 
 class TestBuildChromaWhereFilter:
     """Test ChromaDB filter construction."""
