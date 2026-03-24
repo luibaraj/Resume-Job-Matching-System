@@ -47,6 +47,7 @@ OLLAMA_MODEL: str = "llama3.2:3b-instruct-q4_K_M"
 GENERATION_TEMPERATURE: float = 0.7
 GENERATION_TOP_P: float = 0.9
 GENERATION_MAX_TOKENS: int = 150
+SKELETON_MAX_TOKENS: int = 200
 MAX_BATCH_SIZE: int = 2
 CORPUS_LIMITATION_MESSAGE: str = (
     "No strongly matching jobs found in current corpus. "
