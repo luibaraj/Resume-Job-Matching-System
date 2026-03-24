@@ -27,6 +27,7 @@ from config import (
     DB_DEFAULT_PATH,
     HNSW_EF,
     HNSW_EF_CONSTRUCTION,
+    OLLAMA_MODEL,
     RETRIEVE_TOP_K,
     RERANK_TOP_N,
 )
@@ -41,6 +42,9 @@ from regex_extraction import (
 )
 from retrieval import build_collection, query_collection
 from reranking import rerank_jobs
+
+import ollama
+from generation import run_generation_pipeline
 
 
 def load_resume() -> str:
@@ -189,26 +193,86 @@ def write_results_markdown(results: list[dict], output_path: str = "matched_jobs
                 location, source_url, board_token, cleaned_description.
         output_path: Path to write the Markdown file (default: matched_jobs.md).
     """
+    from config import CORPUS_LIMITATION_MESSAGE
+
     lines = ["# Top Matched Jobs (Reranked)\n"]
-    for i, job in enumerate(results, start=1):
-        title = job.get("title", "Unknown")
-        board_token = job.get("board_token", "Unknown")
-        url = job.get("source_url", "No URL")
-        description = job.get("cleaned_description", "")
 
-        lines.append(f"## {i}. {title}")
-        lines.append(f"- **Board Token:** `{board_token}`")
+    # Filter to only jobs with explanations
+    jobs_with_fits = [job for job in results if job.get("explanation") is not None]
 
-        # Extract minimum years of experience if detected
-        min_years = extract_years_experience(description)
-        if min_years > 0:
-            lines.append(f"- **Min. Years of Experience:** {min_years}")
+    if not jobs_with_fits:
+        lines.append(CORPUS_LIMITATION_MESSAGE)
+    else:
+        for i, job in enumerate(jobs_with_fits, start=1):
+            title = job.get("title", "Unknown")
+            board_token = job.get("board_token", "Unknown")
+            url = job.get("source_url", "No URL")
+            description = job.get("cleaned_description", "")
 
-        lines.append(f"- **URL:** [{url}]({url})\n")
+            lines.append(f"## {i}. {title}")
+            lines.append(f"- **Board Token:** `{board_token}`")
+
+            # Extract minimum years of experience if detected
+            min_years = extract_years_experience(description)
+            if min_years > 0:
+                lines.append(f"- **Min. Years of Experience:** {min_years}")
+
+            lines.append(f"- **URL:** [{url}]({url})\n")
+
+            explanation = job.get("explanation")
+            lines.append(f"- **Fit Summary:** {explanation}\n")
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"Results written to {output_path}")
+
+
+def run_generation_for_results(
+    resume_text: str,
+    results: list[dict],
+    model: str = OLLAMA_MODEL,
+) -> None:
+    """
+    Run generation pipeline on each reranked result and attach explanation in-place.
+
+    Processes one pair at a time to preserve index alignment. Attaches the
+    explanation string to each result dict under "explanation", or None if
+    no grounded match was found. Exits early if Ollama is unreachable.
+    """
+    logging.info("Running generation pipeline for %d results...", len(results))
+
+    for job in results:
+        description = job.get("cleaned_description", "")
+        if not description:
+            job["explanation"] = None
+            continue
+
+        try:
+            generation_output = run_generation_pipeline(
+                pairs=[(resume_text, description)],
+                model=model,
+            )
+        except ollama.RequestError as e:
+            logging.warning("Ollama is not reachable: %s. Skipping generation.", e)
+            for remaining in results:
+                remaining.setdefault("explanation", None)
+            return
+        except ollama.ResponseError as e:
+            logging.warning("Ollama model error for job '%s': %s. Skipping.", job.get("title"), e)
+            job["explanation"] = None
+            continue
+        except Exception as e:
+            logging.warning("Unexpected generation error for job '%s': %s. Skipping.", job.get("title"), e)
+            job["explanation"] = None
+            continue
+
+        if isinstance(generation_output, str):
+            # CORPUS_LIMITATION_MESSAGE returned — no grounded match found
+            logging.info("No grounded match for job '%s'.", job.get("title"))
+            job["explanation"] = None
+        else:
+            # list[PairResult] with exactly one element (we sent one pair)
+            job["explanation"] = generation_output[0]["explanation"]
 
 
 def main() -> None:
@@ -305,6 +369,8 @@ def main() -> None:
             if len(results) == 0:
                 print("No matching jobs found.")
             else:
+                # Step 3: Generation — attach fit explanations
+                run_generation_for_results(resume_text, results)
                 write_results_markdown(results)
 
         finally:
