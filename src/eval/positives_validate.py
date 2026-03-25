@@ -28,7 +28,7 @@ from config import (
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
-from eval.synthetic_positives_generation import JobSkeleton
+from eval.positives_gen import JobSkeleton
 
 logger = logging.getLogger(__name__)
 
