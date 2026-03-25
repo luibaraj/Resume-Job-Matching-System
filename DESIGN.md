@@ -247,3 +247,130 @@ def run_pipeline(
 - Prints at each stage: generation, validation pass/fail, repair pass/fail, discard reason
 - Final summary: total collected, total attempts, discard count, repair success count
 - Optional JSON write with timestamps/metadata (for inspection of generated skeletons)
+
+---
+
+# Synthetic Negatives Pipeline
+
+## Purpose
+
+Synthetic negatives are (resume, job_description) pairs where the job description is intentionally mismatched to the resume in specific ways. Used in eval to test retrieval and reranking correctly reject non-matching jobs.
+
+Currently implemented: **Seniority Mismatch**
+
+Future types: skill gaps, industry mismatch, experience overqualification, etc.
+
+## Seniority Mismatch Negatives
+
+A job description that is realistic in domain and skills but targets a mismatched seniority level:
+
+- **Junior candidate** → Senior or Staff job (overqualification, cannot handle complexity)
+- **Mid candidate** → Junior or Staff job (extreme under/over qualification)
+- **Senior candidate** → Junior job (underqualification, would be bored or overqualified)
+- **Staff candidate** → Junior or Mid job (underqualification)
+
+The seniority gap must be ≥1 level for Mid, ≥2 levels for other levels (to ensure true mismatch).
+
+## Architecture
+
+Follows the same **generate → validate → repair** pattern as positives.
+
+### Step 1: Skeleton Generation (`src/eval/negative_gen/negatives_gen.py`)
+
+**Input**: Resume text, resume seniority level
+
+**Output**: `(JobSkeleton dict, target_seniority str)` tuple
+- Tuple is used because `get_target_seniority` uses `random.choice`; repair needs the exact target that was used
+
+**Processing**:
+
+1. `get_target_seniority(resume_seniority)` → pick a mismatched target seniority
+   - Junior → Senior or Staff (random)
+   - Mid → Junior or Staff (random)
+   - Senior → Junior
+   - Staff → Junior or Mid (random)
+2. `_years_range_for_seniority(target_seniority)` → get pre-computed years (e.g., "4-7" for Senior)
+3. Build prompt embedding target_seniority and years as hard constraints; resume text provides domain/skills context only
+4. Call Ollama with same config as positives_gen (`SKELETON_MAX_TOKENS = 200`)
+5. Parse response into JobSkeleton dict
+6. Return tuple: `(skeleton dict, target_seniority str)`
+
+**Error handling**:
+- Same as positives_gen: ValueError on unparseable response, Ollama errors propagate
+
+### Step 2: Validation (`src/eval/negative_gen/negatives_validate.py`)
+
+**Input**: `JobSkeleton` dict from Step 1, `ResumeInfo`, `target_seniority` string
+
+**Output**: Validation outcome dict with keys `passed` (bool), `failed_check` (str | None), `reason` (str | None)
+
+**Processing**: Four checks run in sequence; short-circuit on first failure.
+
+| Check | Type | Logic |
+|---|---|---|
+| `structural` | LLM | Reused from positives_validate — all 7 fields present, well-formed, in ranges |
+| `seniority_years` | Deterministic | Reused from positives_validate — skeleton's seniority/years internally consistent |
+| `seniority_mismatch` | Deterministic (NEW) | Job seniority gap must meet minimum: Junior resume ≥2, Mid ≥1, Senior ≥2, Staff ≥2 |
+| `skill_domain_overlap` | LLM (NEW) | ≥2 shared skills, same/adjacent domain, realistic responsibilities — ignoring seniority |
+
+**Key differences from positives**:
+- `validate_resume_job_alignment` NOT reused (it enforces seniority proximity ±1, which negatives violate)
+- `validate_domain_consistency` absorbed into `skill_domain_overlap`
+- New `seniority_mismatch` check runs early (deterministic, cheap) before expensive LLM check
+
+**Token budget**: `VALIDATION_MAX_TOKENS = 50` (same as positives)
+
+### Step 3: Failure Recovery (`src/eval/negative_gen/negatives_repair.py`)
+
+**Input**: Failed `JobSkeleton`, `failed_check` string, `reason` string, `ResumeInfo`, **`target_seniority`** string (from generation)
+
+**Output**: `RepairResult` dict: `success` (bool), `job` (JobSkeleton | None), `attempts` (int), `discard_reason` (str | None)
+
+**Retry strategy**: Up to 2 repair attempts, same as positives_repair.
+
+**Critical difference**: `target_seniority` is passed as a parameter (not re-computed via `get_target_seniority`) to ensure the repair targets the same seniority that generation used.
+
+| `failed_check`         | Fields sent to LLM | Fix instruction |
+|------------------------|---|---|
+| `structural`           | `seniority`, `domain`, `years_required`, `primary_skills`, `title` | Fix enum values, years range, skills count (same as positives) |
+| `seniority_years`      | `seniority`, `years_required` | Fix YearsRequired to bracket (same as positives) |
+| `seniority_mismatch`   | `seniority`, `years_required`, `title` | Fix seniority to target (injected into prompt) and years to target's bracket |
+| `skill_domain_overlap` | `primary_skills`, `secondary_skills`, `domain`, `responsibilities` | Fix skills/domain to overlap with resume (don't touch seniority) |
+
+**Temperature and attempt strategy**:
+- Attempt 1: standard temperature, targeted fields
+- Attempt 2: lower temperature (0.3), explicit enum hints, targeted fields; may shift to new failing check
+- After 2 failures: discard
+
+**Token budget**: `REPAIR_MAX_TOKENS = 200` (same as positives)
+
+---
+
+## Shared Types and Utilities
+
+**Owned by positives_validate, imported by negatives**:
+- `JobSkeleton` — TypedDict (7 fields)
+- `ResumeInfo` — TypedDict
+- `ValidationResult` — TypedDict for check results
+- `_normalize_skeleton(job)` — Canonicalizes aliases
+- `_parse_validation_response(response)` — Parses "PASS" or "FAIL: reason"
+- `validate_structural(job, model)` — Reused directly
+- `validate_seniority_years(job, model)` — Reused directly
+- `parse_skeleton_response(response)` — Parses raw LLM response into dict
+- Seniority brackets: Junior (0-2), Mid (0-5), Senior (2-8), Staff (6+)
+
+**Owned by negatives, unique to negatives**:
+- `SENIORITY_ORDER` — ["Junior", "Mid", "Senior", "Staff"]
+- `get_target_seniority(resume_seniority)` — Pick mismatched target
+- `_years_range_for_seniority(seniority)` — Map to canonical range
+- `validate_seniority_mismatch(job, resume_info)` — Deterministic gap check
+- `validate_skill_domain_overlap(job, resume_info, model)` — LLM alignment check (no seniority)
+- Min gap dict: Junior 2, Mid 1, Senior 2, Staff 2
+
+---
+
+## Future Negative Types
+
+Additional negative types can be plugged into `src/eval/negative_gen/` as separate modules (e.g., `negatives_skill_gap.py`, `negatives_industry_mismatch.py`), each following the same generate → validate → repair pattern with type-specific validators.
+
+A future `negatives_pipeline.py` would orchestrate multiple negative types together, collecting a balanced set (e.g., 5 seniority-mismatch + 5 skill-gap negatives) in a single call.
