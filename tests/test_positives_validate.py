@@ -20,7 +20,9 @@ from eval.positives_validate import (
     _build_resume_job_alignment_prompt,
     _build_seniority_years_prompt,
     _build_structural_prompt,
+    _normalize_skeleton,
     _parse_validation_response,
+    _parse_years_min,
     _parse_years_required,
     validate_domain_consistency,
     validate_job_skeleton,
@@ -95,6 +97,47 @@ class TestParseYearsRequired:
         assert _parse_years_required("2-4-6") == 6
 
 
+class TestParseYearsMin:
+    """Tests for _parse_years_min."""
+
+    def test_range_returns_min(self) -> None:
+        """Test that range string returns the minimum value."""
+        assert _parse_years_min("4-6") == 4
+        assert _parse_years_min("2-8") == 2
+        assert _parse_years_min("1-3") == 1
+
+    def test_plain_int(self) -> None:
+        """Test that plain integer is parsed correctly."""
+        assert _parse_years_min("3") == 3
+        assert _parse_years_min("10") == 10
+
+    def test_empty_string(self) -> None:
+        """Test that empty string returns 0."""
+        assert _parse_years_min("") == 0
+
+    def test_whitespace_only(self) -> None:
+        """Test that whitespace-only string returns 0."""
+        assert _parse_years_min("   ") == 0
+
+    def test_unparseable_string(self) -> None:
+        """Test that unparseable string returns 0."""
+        assert _parse_years_min("many") == 0
+        assert _parse_years_min("a lot") == 0
+
+    def test_single_value_range(self) -> None:
+        """Test that single-value range (e.g., '5-5') works."""
+        assert _parse_years_min("5-5") == 5
+
+    def test_range_with_whitespace(self) -> None:
+        """Test that range with whitespace is parsed correctly."""
+        assert _parse_years_min("4 - 6") == 4
+        assert _parse_years_min(" 3 - 5 ") == 3
+
+    def test_multi_part_range(self) -> None:
+        """Test that multi-part ranges return the min."""
+        assert _parse_years_min("2-4-6") == 2
+
+
 class TestParseValidationResponse:
     """Tests for _parse_validation_response."""
 
@@ -137,6 +180,18 @@ class TestParseValidationResponse:
     def test_strips_whitespace(self) -> None:
         """Test that whitespace is stripped."""
         result = _parse_validation_response("  PASS  ")
+        assert result["passed"] is True
+        assert result["reason"] is None
+
+    def test_pass_with_trailing_explanation(self) -> None:
+        """LLM returns PASS followed by explanation text — should still pass."""
+        result = _parse_validation_response("PASS\n\nAll checks succeeded.")
+        assert result["passed"] is True
+        assert result["reason"] is None
+
+    def test_pass_with_bullet_list(self) -> None:
+        """LLM returns PASS followed by a bullet list — should still pass."""
+        result = _parse_validation_response("PASS\n- skill overlap ok\n- seniority ok")
         assert result["passed"] is True
         assert result["reason"] is None
 
@@ -240,25 +295,114 @@ class TestValidateStructural:
 
 
 class TestValidateSeniorityYears:
-    """Tests for validate_seniority_years."""
+    """Tests for validate_seniority_years (deterministic check)."""
 
-    @patch("eval.positives_validate._call_ollama")
-    def test_returns_pass_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
-        """Test that PASS response is parsed correctly."""
-        mock_ollama.return_value = "PASS"
-        result = validate_seniority_years(sample_job)
+    # Junior bracket: max ≤ 2
+    def test_junior_2_years_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Junior with 2 years passes."""
+        job = {**sample_job, "seniority": "Junior", "years_required": "1-2"}
+        assert validate_seniority_years(job)["passed"] is True
 
-        assert result["passed"] is True
-        assert result["reason"] is None
-
-    @patch("eval.positives_validate._call_ollama")
-    def test_returns_fail_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
-        """Test that FAIL response is parsed correctly."""
-        mock_ollama.return_value = "FAIL: years out of seniority bracket"
-        result = validate_seniority_years(sample_job)
-
+    def test_junior_over_2_years_fails(self, sample_job: JobSkeleton) -> None:
+        """Test that Junior with 3 years fails."""
+        job = {**sample_job, "seniority": "Junior", "years_required": "3"}
+        result = validate_seniority_years(job)
         assert result["passed"] is False
-        assert "out of seniority bracket" in result["reason"]
+        assert "Junior" in result["reason"]
+
+    # Mid bracket: max ≤ 5
+    def test_mid_3_years_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Mid with 3 years passes."""
+        job = {**sample_job, "seniority": "Mid", "years_required": "3"}
+        assert validate_seniority_years(job)["passed"] is True
+
+    def test_mid_5_years_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Mid with 3-5 years passes."""
+        job = {**sample_job, "seniority": "Mid", "years_required": "3-5"}
+        assert validate_seniority_years(job)["passed"] is True
+
+    def test_mid_6_years_fails(self, sample_job: JobSkeleton) -> None:
+        """Test that Mid with 6 years fails."""
+        job = {**sample_job, "seniority": "Mid", "years_required": "6"}
+        result = validate_seniority_years(job)
+        assert result["passed"] is False
+
+    # Senior bracket: 2 ≤ max ≤ 8
+    def test_senior_5_7_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Senior with 5-7 years passes."""
+        job = {**sample_job, "seniority": "Senior", "years_required": "5-7"}
+        assert validate_seniority_years(job)["passed"] is True
+
+    def test_senior_4_8_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Senior with 4-8 years passes."""
+        job = {**sample_job, "seniority": "Senior", "years_required": "4-8"}
+        assert validate_seniority_years(job)["passed"] is True
+
+    def test_senior_9_years_fails(self, sample_job: JobSkeleton) -> None:
+        """Test that Senior with 9 years fails."""
+        job = {**sample_job, "seniority": "Senior", "years_required": "9"}
+        result = validate_seniority_years(job)
+        assert result["passed"] is False
+
+    # Staff bracket: max ≥ 6
+    def test_staff_8_years_passes(self, sample_job: JobSkeleton) -> None:
+        """Test that Staff with 8 years passes."""
+        job = {**sample_job, "seniority": "Staff", "years_required": "8"}
+        assert validate_seniority_years(job)["passed"] is True
+
+    def test_staff_5_years_fails(self, sample_job: JobSkeleton) -> None:
+        """Test that Staff with 5 years fails."""
+        job = {**sample_job, "seniority": "Staff", "years_required": "5"}
+        result = validate_seniority_years(job)
+        assert result["passed"] is False
+
+    # Unknown seniority
+    def test_unknown_seniority_fails(self, sample_job: JobSkeleton) -> None:
+        """Test that unknown seniority fails."""
+        job = {**sample_job, "seniority": "Mid-level", "years_required": "3"}
+        result = validate_seniority_years(job)
+        assert result["passed"] is False
+        assert "Unknown seniority" in result["reason"]
+
+
+class TestNormalizeSkeleton:
+    """Tests for _normalize_skeleton."""
+
+    def test_mid_level_normalized_to_mid(self, sample_job: JobSkeleton) -> None:
+        """Test that 'Mid-level' normalizes to 'Mid'."""
+        job = {**sample_job, "seniority": "Mid-level"}
+        result = _normalize_skeleton(job)
+        assert result["seniority"] == "Mid"
+
+    def test_fullstack_case_normalized(self, sample_job: JobSkeleton) -> None:
+        """Test that 'Fullstack' normalizes to 'fullstack'."""
+        job = {**sample_job, "domain": "Fullstack"}
+        result = _normalize_skeleton(job)
+        assert result["domain"] == "fullstack"
+
+    def test_full_dash_stack_normalized(self, sample_job: JobSkeleton) -> None:
+        """Test that 'Full-stack' normalizes to 'fullstack'."""
+        job = {**sample_job, "domain": "Full-stack"}
+        result = _normalize_skeleton(job)
+        assert result["domain"] == "fullstack"
+
+    def test_known_seniority_unchanged(self, sample_job: JobSkeleton) -> None:
+        """Test that known seniority values are preserved."""
+        job = {**sample_job, "seniority": "Senior"}
+        assert _normalize_skeleton(job)["seniority"] == "Senior"
+
+    def test_known_domain_unchanged(self, sample_job: JobSkeleton) -> None:
+        """Test that known domain values are preserved."""
+        job = {**sample_job, "domain": "backend"}
+        assert _normalize_skeleton(job)["domain"] == "backend"
+
+    def test_other_fields_unchanged(self, sample_job: JobSkeleton) -> None:
+        """Test that non-seniority/domain fields are unchanged."""
+        result = _normalize_skeleton(sample_job)
+        assert result["title"] == sample_job["title"]
+        assert result["primary_skills"] == sample_job["primary_skills"]
+        assert result["secondary_skills"] == sample_job["secondary_skills"]
+        assert result["years_required"] == sample_job["years_required"]
 
 
 class TestValidateResumeJobAlignment:

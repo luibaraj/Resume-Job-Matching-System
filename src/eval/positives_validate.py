@@ -95,6 +95,38 @@ def _parse_years_required(years_str: str) -> int:
         return 0
 
 
+def _parse_years_min(years_str: str) -> int:
+    """
+    Parse a raw years_required string to an integer (minimum of range).
+
+    For range strings like "4-6", returns the minimum (4).
+    For plain integers like "3", returns 3.
+    Returns 0 if the string cannot be parsed.
+
+    Args:
+        years_str: Raw years string from JobSkeleton (e.g., "4-6" or "3").
+
+    Returns:
+        Integer years value (min of range, or plain value). 0 on parse failure.
+    """
+    if not years_str.strip():
+        return 0
+
+    # Try parsing as a range (e.g., "4-6")
+    if "-" in years_str:
+        parts = years_str.split("-")
+        try:
+            return min(int(p.strip()) for p in parts if p.strip())
+        except ValueError:
+            return 0
+
+    # Try parsing as a plain integer
+    try:
+        return int(years_str.strip())
+    except ValueError:
+        return 0
+
+
 def _parse_validation_response(raw_response: str) -> ValidationResult:
     """
     Parse an LLM validation response into a ValidationResult.
@@ -115,7 +147,7 @@ def _parse_validation_response(raw_response: str) -> ValidationResult:
     """
     stripped = raw_response.strip()
 
-    if stripped.upper() == "PASS":
+    if stripped.upper().startswith("PASS"):
         return {"passed": True, "reason": None}
 
     if stripped.upper().startswith("FAIL:"):
@@ -311,39 +343,49 @@ def validate_seniority_years(
     model: str = OLLAMA_MODEL,
 ) -> ValidationResult:
     """
-    Run Rule Set 2: seniority-to-years alignment check.
+    Run Rule Set 2: seniority-to-years alignment check (deterministic).
 
-    Checks that the years_required in the skeleton is consistent with
-    the seniority level using the thresholds: Junior ≤ 2, Mid 2–5,
-    Senior 4–8, Staff ≥ 6.
+    Checks that years_required falls within the accepted bracket for the
+    given seniority level using thresholds:
+      Junior: max ≤ 2
+      Mid:    max ≤ 5
+      Senior: 2 ≤ max ≤ 8
+      Staff:  max ≥ 6
+
+    No LLM call is made — this is a purely numeric check.
 
     Args:
         job: JobSkeleton dict from Step 1.
-        model: Ollama model name.
+        model: Ollama model name (kept for signature compatibility, not used).
 
     Returns:
         ValidationResult with passed=True or passed=False and a reason string.
-
-    Raises:
-        ollama.RequestError: If Ollama is not reachable.
-        ollama.ResponseError: If the model returns an error response.
     """
-    prompt = _build_seniority_years_prompt(job["seniority"], job["years_required"])
-    raw_response = _call_ollama(prompt, model)
-    logger.debug("Seniority-years validation response: %s", raw_response)
+    seniority = job["seniority"]
+    years_str = job["years_required"]
 
-    result = _parse_validation_response(raw_response)
+    max_years = _parse_years_required(years_str)
 
-    if result["passed"]:
-        logger.info(
-            "seniority_years: PASS — %s / %s years",
-            job["seniority"],
-            job["years_required"],
-        )
-    else:
-        logger.warning("seniority_years: FAIL — %s", result["reason"])
+    brackets: dict[str, tuple[int, int]] = {
+        "Junior": (0, 2),
+        "Mid":    (0, 5),
+        "Senior": (2, 8),
+        "Staff":  (6, 99),
+    }
 
-    return result
+    if seniority not in brackets:
+        msg = f"Unknown seniority: {seniority!r}"
+        logger.warning("seniority_years: FAIL — %s", msg)
+        return {"passed": False, "reason": msg}
+
+    lo, hi = brackets[seniority]
+    if max_years < lo or max_years > hi:
+        msg = f"{seniority} requires {lo}–{hi} years (max), got {years_str!r}"
+        logger.warning("seniority_years: FAIL — %s", msg)
+        return {"passed": False, "reason": msg}
+
+    logger.info("seniority_years: PASS — %s / %s years", seniority, years_str)
+    return {"passed": True, "reason": None}
 
 
 def validate_resume_job_alignment(
@@ -436,6 +478,53 @@ def validate_domain_consistency(
     return result
 
 
+_SENIORITY_ALIASES: dict[str, str] = {
+    "junior":    "Junior",
+    "mid":       "Mid",
+    "mid-level": "Mid",
+    "midlevel":  "Mid",
+    "mid level": "Mid",
+    "senior":    "Senior",
+    "staff":     "Staff",
+}
+
+_DOMAIN_ALIASES: dict[str, str] = {
+    "backend":           "backend",
+    "frontend":          "frontend",
+    "front-end":         "frontend",
+    "front end":         "frontend",
+    "fullstack":         "fullstack",
+    "full-stack":        "fullstack",
+    "full stack":        "fullstack",
+    "data":              "data",
+    "data science":      "data",
+    "data engineering":  "data",
+}
+
+
+def _normalize_skeleton(job: JobSkeleton) -> JobSkeleton:
+    """
+    Return a copy of job with seniority and domain normalized to canonical enum values.
+
+    Maps common variants (e.g., "Mid-level" → "Mid", "Full-stack" → "fullstack")
+    to their canonical forms. Unknown values are left as-is after title-casing.
+
+    Args:
+        job: JobSkeleton dict.
+
+    Returns:
+        New JobSkeleton dict with normalized fields.
+    """
+    normalized = dict(job)
+    seniority_lower = job["seniority"].strip().lower()
+    normalized["seniority"] = _SENIORITY_ALIASES.get(
+        seniority_lower, job["seniority"].strip().title()
+    )
+    domain_lower = job["domain"].strip().lower()
+    normalized["domain"] = _DOMAIN_ALIASES.get(domain_lower, domain_lower)
+    return normalized
+
+
 def validate_job_skeleton(
     job: JobSkeleton,
     resume_info: ResumeInfo,
@@ -447,6 +536,9 @@ def validate_job_skeleton(
     Executes structural → seniority_years → resume_job_alignment →
     domain_consistency. Stops at the first failure and returns which
     check failed. All four must pass for the skeleton to be accepted.
+
+    Before validation, normalizes seniority and domain fields to canonical
+    enum values (e.g., "Mid-level" → "Mid", "Full-stack" → "fullstack").
 
     Args:
         job: JobSkeleton dict from Step 1.
@@ -467,6 +559,7 @@ def validate_job_skeleton(
         ollama.RequestError: If Ollama is not reachable.
         ollama.ResponseError: If the model returns an error response.
     """
+    job = _normalize_skeleton(job)
     checks = [
         ("structural", lambda: validate_structural(job, model)),
         ("seniority_years", lambda: validate_seniority_years(job, model)),
