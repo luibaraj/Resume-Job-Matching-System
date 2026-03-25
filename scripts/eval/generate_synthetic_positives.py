@@ -26,8 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from config import YEARS_UNKNOWN
-from eval.positives_pipeline import run_pipeline
-from eval.positives_validate import ResumeInfo
+from eval.positive_gen.positives_pipeline import run_pipeline
+from eval.positive_gen.positives_validate import ResumeInfo
 from regex_extraction import extract_user_years_experience
 
 logging.basicConfig(

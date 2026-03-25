@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from eval.positives_gen import JobSkeleton
-from eval.positives_validate import (
+from eval.positive_gen.positives_gen import JobSkeleton
+from eval.positive_gen.positives_validate import (
     ResumeInfo,
     ValidationResult,
     _build_domain_consistency_prompt,

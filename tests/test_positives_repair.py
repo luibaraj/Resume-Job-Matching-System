@@ -14,15 +14,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from eval.positives_gen import JobSkeleton
-from eval.positives_repair import (
+from eval.positive_gen.positives_gen import JobSkeleton
+from eval.positive_gen.positives_repair import (
     RepairResult,
     _format_fields_for_prompt,
     _get_fields_for_check,
     _merge_repaired_fields,
     repair_job_skeleton,
 )
-from eval.positives_validate import ResumeInfo
+from eval.positive_gen.positives_validate import ResumeInfo
 
 
 @pytest.fixture

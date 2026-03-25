@@ -16,12 +16,12 @@ from pathlib import Path
 
 import ollama
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from config import OLLAMA_MODEL
-from eval.positives_gen import JobSkeleton, generate_job_skeleton
-from eval.positives_validate import ResumeInfo, validate_job_skeleton
-from eval.positives_repair import repair_job_skeleton
+from .positives_gen import JobSkeleton, generate_job_skeleton
+from .positives_validate import ResumeInfo, validate_job_skeleton
+from .positives_repair import repair_job_skeleton
 
 
 def run_pipeline(

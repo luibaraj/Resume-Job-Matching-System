@@ -19,7 +19,7 @@ from typing import TypedDict
 
 import ollama
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from config import (
     GENERATION_TOP_P,
@@ -27,8 +27,8 @@ from config import (
     OLLAMA_MODEL,
     REPAIR_MAX_TOKENS,
 )
-from eval.positives_gen import JobSkeleton, parse_skeleton_response
-from eval.positives_validate import ResumeInfo, validate_job_skeleton
+from .positives_gen import JobSkeleton, parse_skeleton_response
+from .positives_validate import ResumeInfo, validate_job_skeleton
 
 logger = logging.getLogger(__name__)
 

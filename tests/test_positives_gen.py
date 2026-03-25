@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from eval.positives_gen import (
+from eval.positive_gen.positives_gen import (
     JobSkeleton,
     generate_job_skeleton,
     parse_skeleton_response,

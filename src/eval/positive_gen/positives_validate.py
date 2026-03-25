@@ -20,7 +20,7 @@ from typing import TypedDict
 import ollama
 
 # Allow running as a script from any working directory
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from config import (
     GENERATION_TEMPERATURE,
@@ -28,7 +28,7 @@ from config import (
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
-from eval.positives_gen import JobSkeleton
+from .positives_gen import JobSkeleton
 
 logger = logging.getLogger(__name__)
 

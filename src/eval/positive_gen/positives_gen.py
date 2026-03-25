@@ -19,7 +19,7 @@ from typing import TypedDict
 import ollama
 
 # Allow running as a script from any working directory
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from config import (
     GENERATION_TEMPERATURE,

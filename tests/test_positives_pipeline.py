@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import ollama
 
-from eval.positives_gen import JobSkeleton
-from eval.positives_pipeline import run_pipeline
-from eval.positives_validate import ResumeInfo
+from eval.positive_gen.positives_gen import JobSkeleton
+from eval.positive_gen.positives_pipeline import run_pipeline
+from eval.positive_gen.positives_validate import ResumeInfo
 
 
 @pytest.fixture
