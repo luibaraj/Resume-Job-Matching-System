@@ -279,7 +279,7 @@ class TestBuildDomainConsistencyPrompt:
 class TestValidateStructural:
     """Tests for validate_structural."""
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_pass_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
         """Test that PASS response is parsed correctly."""
         mock_ollama.return_value = "PASS"
@@ -288,7 +288,7 @@ class TestValidateStructural:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_fail_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
         """Test that FAIL response is parsed correctly."""
         mock_ollama.return_value = "FAIL: invalid seniority"
@@ -412,7 +412,7 @@ class TestNormalizeSkeleton:
 class TestValidateResumeJobAlignment:
     """Tests for validate_resume_job_alignment."""
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_pass_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -423,7 +423,7 @@ class TestValidateResumeJobAlignment:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_fail_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -438,7 +438,7 @@ class TestValidateResumeJobAlignment:
 class TestValidateDomainConsistency:
     """Tests for validate_domain_consistency."""
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_pass_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -449,7 +449,7 @@ class TestValidateDomainConsistency:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate._call_ollama")
     def test_returns_fail_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -464,10 +464,10 @@ class TestValidateDomainConsistency:
 class TestValidateJobSkeleton:
     """Tests for validate_job_skeleton."""
 
-    @patch("eval.positives_validate.validate_structural")
-    @patch("eval.positives_validate.validate_seniority_years")
-    @patch("eval.positives_validate.validate_resume_job_alignment")
-    @patch("eval.positives_validate.validate_domain_consistency")
+    @patch("eval.positive_gen.positives_validate.validate_structural")
+    @patch("eval.positive_gen.positives_validate.validate_seniority_years")
+    @patch("eval.positive_gen.positives_validate.validate_resume_job_alignment")
+    @patch("eval.positive_gen.positives_validate.validate_domain_consistency")
     def test_all_pass(
         self,
         mock_domain: MagicMock,
@@ -495,10 +495,10 @@ class TestValidateJobSkeleton:
         assert mock_alignment.call_count == 1
         assert mock_domain.call_count == 1
 
-    @patch("eval.positives_validate.validate_structural")
-    @patch("eval.positives_validate.validate_seniority_years")
-    @patch("eval.positives_validate.validate_resume_job_alignment")
-    @patch("eval.positives_validate.validate_domain_consistency")
+    @patch("eval.positive_gen.positives_validate.validate_structural")
+    @patch("eval.positive_gen.positives_validate.validate_seniority_years")
+    @patch("eval.positive_gen.positives_validate.validate_resume_job_alignment")
+    @patch("eval.positive_gen.positives_validate.validate_domain_consistency")
     def test_fails_at_structural(
         self,
         mock_domain: MagicMock,
@@ -522,10 +522,10 @@ class TestValidateJobSkeleton:
         assert mock_alignment.call_count == 0
         assert mock_domain.call_count == 0
 
-    @patch("eval.positives_validate.validate_structural")
-    @patch("eval.positives_validate.validate_seniority_years")
-    @patch("eval.positives_validate.validate_resume_job_alignment")
-    @patch("eval.positives_validate.validate_domain_consistency")
+    @patch("eval.positive_gen.positives_validate.validate_structural")
+    @patch("eval.positive_gen.positives_validate.validate_seniority_years")
+    @patch("eval.positive_gen.positives_validate.validate_resume_job_alignment")
+    @patch("eval.positive_gen.positives_validate.validate_domain_consistency")
     def test_fails_at_seniority_years(
         self,
         mock_domain: MagicMock,
@@ -549,10 +549,10 @@ class TestValidateJobSkeleton:
         assert mock_alignment.call_count == 0
         assert mock_domain.call_count == 0
 
-    @patch("eval.positives_validate.validate_structural")
-    @patch("eval.positives_validate.validate_seniority_years")
-    @patch("eval.positives_validate.validate_resume_job_alignment")
-    @patch("eval.positives_validate.validate_domain_consistency")
+    @patch("eval.positive_gen.positives_validate.validate_structural")
+    @patch("eval.positive_gen.positives_validate.validate_seniority_years")
+    @patch("eval.positive_gen.positives_validate.validate_resume_job_alignment")
+    @patch("eval.positive_gen.positives_validate.validate_domain_consistency")
     def test_fails_at_resume_job_alignment(
         self,
         mock_domain: MagicMock,
@@ -577,10 +577,10 @@ class TestValidateJobSkeleton:
         assert mock_alignment.call_count == 1
         assert mock_domain.call_count == 0
 
-    @patch("eval.positives_validate.validate_structural")
-    @patch("eval.positives_validate.validate_seniority_years")
-    @patch("eval.positives_validate.validate_resume_job_alignment")
-    @patch("eval.positives_validate.validate_domain_consistency")
+    @patch("eval.positive_gen.positives_validate.validate_structural")
+    @patch("eval.positive_gen.positives_validate.validate_seniority_years")
+    @patch("eval.positive_gen.positives_validate.validate_resume_job_alignment")
+    @patch("eval.positive_gen.positives_validate.validate_domain_consistency")
     def test_fails_at_domain_consistency(
         self,
         mock_domain: MagicMock,

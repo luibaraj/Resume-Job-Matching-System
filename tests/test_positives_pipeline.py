@@ -67,8 +67,8 @@ class TestRunPipeline:
         result = run_pipeline("   \n  \t  ", resume_info, target_count=5)
         assert result == []
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
     def test_collects_target_count_on_all_pass(
         self,
         mock_validate: MagicMock,
@@ -92,9 +92,9 @@ class TestRunPipeline:
         assert len(result) == 3
         assert all(job == valid_job for job in result)
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
-    @patch("eval.positives_pipeline.repair_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.repair_job_skeleton")
     def test_collects_repaired_jobs(
         self,
         mock_repair: MagicMock,
@@ -125,9 +125,9 @@ class TestRunPipeline:
         assert result[0] == valid_job
         assert mock_repair.call_count == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
-    @patch("eval.positives_pipeline.repair_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.repair_job_skeleton")
     def test_discards_unrepaired_jobs(
         self,
         mock_repair: MagicMock,
@@ -160,9 +160,9 @@ class TestRunPipeline:
         # Pipeline should have stopped after safety cap (1 * 10 = 10 attempts)
         assert mock_generate.call_count <= 10
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
-    @patch("eval.positives_pipeline.repair_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.repair_job_skeleton")
     def test_stops_at_safety_cap(
         self,
         mock_repair: MagicMock,
@@ -195,7 +195,7 @@ class TestRunPipeline:
         # Safety cap is target_count * 10 = 20
         assert mock_generate.call_count == 20
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
     def test_skips_generation_value_error(
         self,
         mock_generate: MagicMock,
@@ -216,7 +216,7 @@ class TestRunPipeline:
             },
         ]
 
-        with patch("eval.positives_pipeline.validate_job_skeleton") as mock_validate:
+        with patch("eval.positive_gen.positives_pipeline.validate_job_skeleton") as mock_validate:
             mock_validate.return_value = {
                 "passed": True,
                 "failed_check": None,
@@ -228,7 +228,7 @@ class TestRunPipeline:
             # Should collect 1 job despite first generation failing
             assert len(result) == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
     def test_skips_ollama_request_error(
         self,
         mock_generate: MagicMock,
@@ -249,7 +249,7 @@ class TestRunPipeline:
             },
         ]
 
-        with patch("eval.positives_pipeline.validate_job_skeleton") as mock_validate:
+        with patch("eval.positive_gen.positives_pipeline.validate_job_skeleton") as mock_validate:
             mock_validate.return_value = {
                 "passed": True,
                 "failed_check": None,
@@ -261,7 +261,7 @@ class TestRunPipeline:
             # Should collect 1 job despite first generation failing
             assert len(result) == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
     def test_skips_ollama_response_error(
         self,
         mock_generate: MagicMock,
@@ -282,7 +282,7 @@ class TestRunPipeline:
             },
         ]
 
-        with patch("eval.positives_pipeline.validate_job_skeleton") as mock_validate:
+        with patch("eval.positive_gen.positives_pipeline.validate_job_skeleton") as mock_validate:
             mock_validate.return_value = {
                 "passed": True,
                 "failed_check": None,
@@ -294,8 +294,8 @@ class TestRunPipeline:
             # Should collect 1 job despite first generation failing
             assert len(result) == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
     def test_writes_output_json(
         self,
         mock_validate: MagicMock,
@@ -328,8 +328,8 @@ class TestRunPipeline:
         assert len(data) == 2
         assert data[0]["title"] == valid_job["title"]
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
     def test_no_file_written_when_output_path_none(
         self,
         mock_validate: MagicMock,
@@ -357,8 +357,8 @@ class TestRunPipeline:
         # No file should be written
         assert len(result) == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
     def test_skips_validation_ollama_error(
         self,
         mock_validate: MagicMock,
@@ -384,9 +384,9 @@ class TestRunPipeline:
         # Should eventually collect 1 job despite first validation error
         assert len(result) == 1
 
-    @patch("eval.positives_pipeline.generate_job_skeleton")
-    @patch("eval.positives_pipeline.validate_job_skeleton")
-    @patch("eval.positives_pipeline.repair_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.repair_job_skeleton")
     def test_repair_ollama_error_increments_discard(
         self,
         mock_repair: MagicMock,

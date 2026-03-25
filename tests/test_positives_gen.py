@@ -167,7 +167,7 @@ class TestBuildSkeletonPrompt:
 class TestGenerateJobSkeleton:
     """Tests for generate_job_skeleton."""
 
-    @patch("eval.positives_gen._call_ollama")
+    @patch("eval.positive_gen.positives_gen._call_ollama")
     def test_calls_ollama_and_parses_result(self, mock_ollama: MagicMock) -> None:
         """Test that generate_job_skeleton calls Ollama and parses the result."""
         mock_ollama.return_value = """Title: Senior Backend Engineer
@@ -188,7 +188,7 @@ Responsibilities: Design scalable APIs; Review code; Optimize databases"""
         # Verify Ollama was called
         assert mock_ollama.call_count == 1
 
-    @patch("eval.positives_gen._call_ollama")
+    @patch("eval.positive_gen.positives_gen._call_ollama")
     def test_raises_value_error_on_bad_response(self, mock_ollama: MagicMock) -> None:
         """Test that ValueError is propagated when parsing fails."""
         mock_ollama.return_value = "garbage response with no colons"
@@ -196,7 +196,7 @@ Responsibilities: Design scalable APIs; Review code; Optimize databases"""
         with pytest.raises(ValueError, match="No recognizable fields"):
             generate_job_skeleton("test resume")
 
-    @patch("eval.positives_gen._call_ollama")
+    @patch("eval.positive_gen.positives_gen._call_ollama")
     def test_accepts_custom_model(self, mock_ollama: MagicMock) -> None:
         """Test that custom model parameter is passed to Ollama."""
         mock_ollama.return_value = """Title: Engineer
