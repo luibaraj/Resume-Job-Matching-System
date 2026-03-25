@@ -187,3 +187,63 @@ fix prompt, parses via `parse_skeleton_response`, and re-runs all 4 validations.
 
 The validated (or repaired) skeleton from Steps 2–3 will be expanded into a full synthetic
 job description by providing the structured fields as context for a second LLM call.
+
+## Step 5: Orchestration (`src/eval/positives_pipeline.py`)
+
+**Input**: Resume text + `ResumeInfo`, target skeleton count
+
+**Output**: List of validated `JobSkeleton` dicts (up to target count)
+
+**Processing**: Orchestrates Steps 1–3 in a loop with automatic retry and discard logic.
+
+### Pipeline Loop
+
+```
+while collected < target_count:
+    ↓ (check safety cap)
+    Generate skeleton from resume
+        → on parse/Ollama error: continue (count attempt, restart)
+    ↓
+    Validate against all 4 rules
+        → PASS: collect and continue
+        → FAIL: proceed to repair
+    ↓
+    Repair (max 2 attempts internally)
+        → success: collect and continue
+        → failure: discard and restart from scratch
+```
+
+### Safety Cap
+
+- Max total attempts = `target_count * 10`
+- If exhausted before collecting `target_count`, return partial list (no exception)
+- Prevents infinite loops if Ollama is unstable or model quality is poor
+
+### Entry Point
+
+```python
+def run_pipeline(
+    resume_text: str,
+    resume_info: ResumeInfo,
+    target_count: int = 5,
+    model: str = OLLAMA_MODEL,
+    output_path: str | None = "data/synthetic_positives.json",
+) -> list[JobSkeleton]:
+```
+
+- `target_count`: Number of valid skeletons to collect (default: 5)
+- `output_path`: If not None, write collected skeletons to JSON after loop (default: `"data/synthetic_positives.json"`)
+- Returns: List of validated skeletons (may be shorter than `target_count` if safety cap hit)
+
+### Error Handling
+
+- **Ollama connectivity failure** (generation, validation, or repair): caught, logged, counted as 1 attempt, loop continues
+- **LLM parse failure** (generation): caught, logged, counted as 1 attempt, loop continues
+- **Repair exhausts attempts**: skeleton discarded, loop restarts from step 1
+- **Safety cap hit**: loop exits, returns partial result
+
+### Observability
+
+- Prints at each stage: generation, validation pass/fail, repair pass/fail, discard reason
+- Final summary: total collected, total attempts, discard count, repair success count
+- Optional JSON write with timestamps/metadata (for inspection of generated skeletons)
