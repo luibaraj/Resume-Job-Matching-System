@@ -152,7 +152,38 @@ Any FAIL → Step 3: Fix/Discard
 one short line ("PASS" or "FAIL: <brief reason>"), so a low token cap is safe and
 prevents the model from emitting unsolicited commentary.
 
-## Step 3: Expansion (Future)
+## Step 3: Failure Recovery (`src/eval/positives_repair.py`)
 
-The validated skeleton from Step 2 will be expanded into a full synthetic job description
-by providing the structured fields as context for a second LLM call.
+**Input**: Failed `JobSkeleton`, `failed_check` string, `reason` string, `ResumeInfo`
+
+**Output**: `RepairResult` dict: `success` (bool), `job` (JobSkeleton | None), `attempts` (int), `discard_reason` (str | None)
+
+**Retry strategy**: Up to 2 repair attempts. Each attempt calls the LLM with a targeted
+fix prompt, parses via `parse_skeleton_response`, and re-runs all 4 validations.
+
+- **Attempt 1**: Only the fields relevant to the failing check are sent to the LLM. The model
+  outputs only those fields back. The repaired values are merged into the original skeleton
+  (unchanged fields preserved). Temperature `GENERATION_TEMPERATURE = 0.7`.
+- **Attempt 2**: Same targeted approach but stricter — explicit enum hints inline in the
+  format template, imperative close ("You MUST correct this."). Temperature lowered to `0.3`
+  for more deterministic output. If attempt 1 shifted the failure to a different check,
+  attempt 2 targets the new failing fields.
+- **Discard**: After 2 failed attempts, returns `RepairResult(success=False, job=None)`.
+
+| `failed_check`         | Fields sent to LLM                                  | Fix instruction                                           |
+|------------------------|-----------------------------------------------------|-----------------------------------------------------------|
+| `structural`           | `seniority`, `domain`, `years_required`, `primary_skills`, `title` | Fix enum values, years range 1–20, skills count 2–4 |
+| `seniority_years`      | `seniority`, `years_required`                       | Fix YearsRequired to bracket: Junior 0–2, Mid 2–5, Senior 4–8, Staff 6+ |
+| `resume_job_alignment` | `primary_skills`, `seniority`                       | Fix skills (≥2 overlap with resume), seniority (±1 of resume level) |
+| `domain_consistency`   | `domain`                                            | Fix domain to match resume domain + title                 |
+
+**Error handling**:
+- `ValueError` from `parse_skeleton_response` is caught and counted as a failed attempt
+- `ollama.RequestError` / `ollama.ResponseError` propagate to the caller
+
+**Token budget**: `REPAIR_MAX_TOKENS = 200` — same output format as skeleton generation.
+
+## Step 4: Expansion (Future)
+
+The validated (or repaired) skeleton from Steps 2–3 will be expanded into a full synthetic
+job description by providing the structured fields as context for a second LLM call.
