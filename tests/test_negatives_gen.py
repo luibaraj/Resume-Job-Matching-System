@@ -132,10 +132,10 @@ class TestGenerateMismatchedSkeleton:
 
     @patch("eval.negative_gen.negatives_gen._call_ollama")
     @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_returns_tuple_of_skeleton_and_target_seniority(
+    def test_returns_tuple_of_skeleton_and_mismatch_context(
         self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
     ) -> None:
-        """Should return tuple of (JobSkeleton dict, target_seniority str)."""
+        """Should return tuple of (JobSkeleton dict, mismatch_context dict)."""
         mock_get_target.return_value = "Staff"
         mock_call_ollama.return_value = """Title: Staff Data Engineer
 Seniority: Staff
@@ -145,14 +145,15 @@ PrimarySkills: Python, Spark, SQL
 SecondarySkills: Kubernetes
 Responsibilities: Design data pipelines; Lead architecture; Mentor team"""
 
-        skeleton, target = generate_mismatched_skeleton(
+        skeleton, context = generate_mismatched_skeleton(
             "Resume text", "Junior"
         )
 
         assert isinstance(skeleton, dict)
         assert skeleton["title"] == "Staff Data Engineer"
         assert skeleton["seniority"] == "Staff"
-        assert target == "Staff"
+        assert isinstance(context, dict)
+        assert context["target_seniority"] == "Staff"
 
     @patch("eval.negative_gen.negatives_gen._call_ollama")
     @patch("eval.negative_gen.negatives_gen.get_target_seniority")

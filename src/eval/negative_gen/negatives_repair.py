@@ -24,6 +24,7 @@ from config import (
 from eval.positive_gen.positives_gen import JobSkeleton, parse_skeleton_response
 from eval.positive_gen.positives_validate import ResumeInfo
 from .negatives_validate import validate_mismatched_skeleton
+from .negatives_gen import MismatchType
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
     Maps each failed_check to the minimal set of JobSkeleton field keys
     that need to be shown to the LLM for repair.
 
-    Extends the positive_repair mapping with two new checks specific to negatives.
+    Extends the positive_repair mapping with new checks specific to negatives.
     """
     field_map = {
         "structural": [
@@ -64,6 +65,8 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
             "domain",
             "responsibilities",
         ],
+        "domain_mismatch": ["domain", "title"],
+        "responsibility_mismatch": ["responsibilities", "primary_skills", "secondary_skills"],
     }
     return field_map.get(failed_check, [])
 
@@ -113,7 +116,7 @@ def _build_repair_prompt(
     reason: str | None,
     attempt: int,
     resume_info: ResumeInfo,
-    target_seniority: str,
+    mismatch_context: dict,
 ) -> str:
     """
     Builds a targeted fix prompt for the failing check.
@@ -125,8 +128,10 @@ def _build_repair_prompt(
         reason: The failure reason from validation.
         attempt: Attempt number (1 or 2).
         resume_info: Resume information used for context in some fix instructions.
-        target_seniority: The target mismatched seniority that generation determined.
-                         Used for seniority_mismatch and skill_domain_overlap repairs.
+        mismatch_context: Dict with mismatch metadata, e.g.:
+                         {"target_seniority": "Senior"} for seniority mismatch
+                         {"target_seniority": "Senior", "target_domain": "data", "resume_domain": "backend"} for domain mismatch
+                         {"target_seniority": "Senior", "resume_domain": "backend"} for responsibility mismatch
 
     Returns:
         The prompt string to send to the LLM.
@@ -164,6 +169,7 @@ def _build_repair_prompt(
             f"Current seniority is '{job['seniority']}'. Adjust YearsRequired accordingly."
         )
     elif failed_check == "seniority_mismatch":
+        target_seniority = mismatch_context.get("target_seniority", "")
         target_bracket = seniority_brackets.get(target_seniority, "unknown")
         fix_instruction = (
             f"Fix the seniority and years to match the target: {target_seniority}\n"
@@ -173,6 +179,7 @@ def _build_repair_prompt(
             f"This is intentionally different from the resume seniority — that is correct."
         )
     elif failed_check == "skill_domain_overlap":
+        target_seniority = mismatch_context.get("target_seniority", "")
         fix_instruction = (
             "Fix skills and domain to align with the resume:\n"
             "- At least 2 of the resume's skills must appear in PrimarySkills\n"
@@ -181,6 +188,27 @@ def _build_repair_prompt(
             f"Resume domain: {resume_info['domain']}\n"
             f"Resume primary skills: {', '.join(resume_info['primary_skills'])}\n"
             f"NOTE: Do NOT change seniority — {target_seniority} mismatch is intentional."
+        )
+    elif failed_check == "domain_mismatch":
+        target_domain = mismatch_context.get("target_domain", "")
+        resume_domain = mismatch_context.get("resume_domain", resume_info["domain"])
+        fix_instruction = (
+            f"Fix the domain to be genuinely different from the resume domain.\n"
+            f"- Domain MUST be: {target_domain}\n"
+            f"- Domain must NOT be: {resume_domain} or any adjacent domain\n"
+            f"- Update Title to reflect the {target_domain} domain\n"
+            f"This is intentionally a domain shift — the seniority is correct."
+        )
+    elif failed_check == "responsibility_mismatch":
+        resume_domain = mismatch_context.get("resume_domain", resume_info["domain"])
+        fix_instruction = (
+            "Rewrite responsibilities to describe a DIFFERENT type of engineering work.\n"
+            "- Choose a different sub-role within the same domain\n"
+            "- Responsibilities must NOT describe work the resume candidate demonstrably does\n"
+            f"Resume domain: {resume_domain}\n"
+            f"Resume primary skills: {', '.join(resume_info['primary_skills'])}\n"
+            "Focus on a clearly different function: e.g., if candidate builds APIs, write "
+            "responsibilities for infrastructure automation, data pipelines, or ML serving."
         )
     else:
         fix_instruction = "Fix the above fields to pass validation."
@@ -276,8 +304,9 @@ def repair_mismatched_skeleton(
     failed_check: str,
     reason: str | None,
     resume_info: ResumeInfo,
-    target_seniority: str,
+    mismatch_context: dict,
     model: str = OLLAMA_MODEL,
+    mismatch_type: MismatchType = "seniority",
 ) -> RepairResult:
     """
     Attempt to repair a failed mismatched JobSkeleton through up to 2 targeted fix attempts.
@@ -286,17 +315,17 @@ def repair_mismatched_skeleton(
     failing check. If the repaired skeleton passes all validations, it is returned
     immediately. If both attempts fail, the skeleton is discarded.
 
-    CRITICAL: target_seniority is passed as a parameter (not re-computed via
-    get_target_seniority) to ensure the repair targets the same seniority that
-    generation determined.
+    CRITICAL: mismatch_context is passed as a parameter (not re-computed during repair)
+    to ensure the repair maintains the same mismatch target that generation determined.
 
     Args:
         job: The JobSkeleton that failed validation.
         failed_check: The validation check that failed (e.g., "seniority_mismatch").
         reason: The failure reason from validation.
         resume_info: Resume information (used in fix instructions for some checks).
-        target_seniority: The target mismatched seniority (from generation, not re-randomized).
+        mismatch_context: Dict with mismatch metadata from generation (e.g., target_seniority, target_domain).
         model: Ollama model name (defaults to OLLAMA_MODEL).
+        mismatch_type: Type of mismatch ("seniority", "domain", "responsibility").
 
     Returns:
         RepairResult with success, job, attempts, and discard_reason fields.
@@ -311,7 +340,7 @@ def repair_mismatched_skeleton(
             else _REPAIR_TEMPERATURE_ATTEMPT2
         )
         prompt = _build_repair_prompt(
-            current_job, failed_check, reason, attempt, resume_info, target_seniority
+            current_job, failed_check, reason, attempt, resume_info, mismatch_context
         )
         raw = _call_ollama(prompt, model, temperature)
 
@@ -326,7 +355,7 @@ def repair_mismatched_skeleton(
         # Merge only the repaired fields back into the current skeleton
         candidate = _merge_repaired_fields(current_job, repaired_partial, fields)
 
-        validation = validate_mismatched_skeleton(candidate, resume_info, model)
+        validation = validate_mismatched_skeleton(candidate, resume_info, model, mismatch_type)
 
         if validation["passed"]:
             logger.info("repair attempt %d: PASS — %s", attempt, candidate["title"])

@@ -117,7 +117,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         assert result["success"] is True
@@ -150,7 +150,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         assert result["success"] is False
@@ -182,7 +182,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         # Check the temperature parameter for both calls (positional arg at index 2)
@@ -228,7 +228,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         # Verify we made 2 calls (2 attempts)
@@ -254,7 +254,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         # Check that "Senior" appears in the prompt for seniority_mismatch repair
@@ -281,7 +281,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Staff",
+            {"target_seniority": "Staff"},
         )
 
         # Verify the prompt includes explicit target seniority instruction
@@ -313,7 +313,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         # Should succeed on attempt 2
@@ -347,7 +347,7 @@ class TestRepairMismatchedSkeleton:
             "seniority_mismatch",
             "Gap too small",
             senior_resume_info,
-            "Senior",
+            {"target_seniority": "Senior"},
         )
 
         # domain should be preserved from original
