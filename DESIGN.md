@@ -68,11 +68,12 @@ Synthetic positives are (resume, job_description) pairs where the job descriptio
 is constructed to match a real resume. Used in eval to test retrieval and reranking
 can surface a known positive.
 
-## Step 1: Skeleton Generation (`src/eval/synthetic_positives.py`)
+## Step 1: Skeleton Generation (`src/eval/synthetic_positives_generation.py`)
 
 **Input**: Resume text
 
 **Output**: `JobSkeleton` dict with fields:
+
 - `title`: Job title with seniority prefix (e.g., "Senior Backend Engineer")
 - `seniority`: Junior / Mid / Senior / Staff
 - `years_required`: Raw string, may be a range (e.g., "4-6")
@@ -81,6 +82,7 @@ can surface a known positive.
 - `secondary_skills`: List of secondary/nice-to-have skills
 
 **Processing**:
+
 1. Build a structured prompt asking the LLM to generate one job skeleton
 2. Call Ollama (LLaMA 3.2 3B) with bounded token output (`SKELETON_MAX_TOKENS = 200`)
 3. Parse the response into a Python dict by iterating lines, splitting on first `:`,
@@ -88,26 +90,69 @@ can surface a known positive.
    skill lists
 
 **Error handling**:
+
 - Empty or unparseable LLM output raises `ValueError`
 - Ollama connectivity failures propagate as `ollama.RequestError`
 - Each field defaults to empty string or empty list if missing; only raises if zero
   recognized fields are found (completely malformed response)
 
-## Step 2 (Future): Skeleton Expansion
+## Step 2: Validation (`src/eval/synthetic_posititves_validation.py`)
 
-The skeleton from Step 1 will be expanded into a full synthetic job description
+**Input**: `JobSkeleton` dict from Step 1, plus `ResumeInfo` (seniority, years_experience, primary_skills, domain)
+
+**Output**: Validation outcome dict with keys `passed` (bool), `failed_check` (str | None), `reason` (str | None)
+
+**Processing**: Four rule sets are executed in sequence; the pipeline short-circuits on the first failure.
+
+### Rule Set 1 — Structural Validation
+
+Verifies format compliance: title is non-empty, seniority is one of Junior/Mid/Senior/Staff,
+years_required is 0–20, domain is one of backend/frontend/fullstack/data, and primary_skills
+has 2–4 items. Uses a single LLM call with a structured checklist prompt.
+
+### Rule Set 2 — Seniority-Years Alignment
+
+Verifies the years_required value is consistent with the seniority level:
+Junior ≤ 2, Mid 2–5, Senior 4–8, Staff ≥ 6.
+For range strings (e.g., "4-6"), the maximum is taken before comparison.
+
+### Rule Set 3 — Resume-Job Alignment
+
+Verifies that at least 2 of the resume's primary skills appear in the job's primary skills,
+job seniority is within ±1 level of resume seniority, and job years required ≤ resume
+years_experience + 2.
+
+### Rule Set 4 — Domain Consistency
+
+Verifies the job domain aligns with the resume domain (exact or adjacent match) and that
+the domain is consistent with the job title.
+
+### Validation Flow
+
+```
+validate_structural(job)                              → PASS/FAIL
+    ↓ PASS
+validate_seniority_years(job)                         → PASS/FAIL
+    ↓ PASS
+validate_resume_job_alignment(job, resume_info)       → PASS/FAIL
+    ↓ PASS
+validate_domain_consistency(job, resume_info)         → PASS/FAIL
+    ↓ PASS → accepted skeleton → Step 3: Expansion
+
+Any FAIL → Step 3: Fix/Discard
+```
+
+**Error handling**:
+
+- Unparseable LLM responses (neither "PASS" nor "FAIL: ...") are treated as failures
+  with reason "Unparseable LLM response: <raw>" and routed to fix/discard
+- `ollama.RequestError` and `ollama.ResponseError` propagate to the caller
+
+**Token budget**: `VALIDATION_MAX_TOKENS = 50` — validation responses are at most
+one short line ("PASS" or "FAIL: <brief reason>"), so a low token cap is safe and
+prevents the model from emitting unsolicited commentary.
+
+## Step 3: Expansion (Future)
+
+The validated skeleton from Step 2 will be expanded into a full synthetic job description
 by providing the structured fields as context for a second LLM call.
-
-## Trade-off Analysis: Skeleton vs. Full Generation
-
-| Approach | Pros | Cons |
-|---|---|---|
-| **Skeleton (current)** | Shorter LLM output → higher parse success rate; structured fields make Stage 2 expansion reliable; easy per-field validation | Requires a second LLM call in Stage 2 to produce full description; two-stage latency |
-| **Full generation** | Single LLM call produces complete job description; more variety in output prose | Longer free-form output increases hallucination and parse failure rate; harder to validate; LLaMA 3B degrades significantly on long structured outputs |
-
-**Decision**: The skeleton approach was chosen because LLaMA 3.2 3B (the model in use)
-is a small model optimized for instruction-following on short outputs. Asking it to
-generate a full multi-paragraph job description in one pass produces inconsistent
-formatting and frequent truncation at 150-200 tokens. The skeleton constrains the
-output to 6 labeled fields that can be verified line-by-line, giving a much higher
-success rate in the eval pipeline where data quality is critical.

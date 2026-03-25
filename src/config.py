@@ -48,6 +48,7 @@ GENERATION_TEMPERATURE: float = 0.7
 GENERATION_TOP_P: float = 0.9
 GENERATION_MAX_TOKENS: int = 150
 SKELETON_MAX_TOKENS: int = 200
+VALIDATION_MAX_TOKENS: int = 50
 MAX_BATCH_SIZE: int = 2
 CORPUS_LIMITATION_MESSAGE: str = (
     "No strongly matching jobs found in current corpus. "
