@@ -35,6 +35,7 @@ def sample_job() -> JobSkeleton:
         "domain": "backend",
         "primary_skills": ["Python", "Go"],
         "secondary_skills": ["Docker"],
+        "responsibilities": ["Build APIs", "Optimize databases", "Review code"],
     }
 
 
@@ -46,6 +47,7 @@ def sample_resume_info() -> ResumeInfo:
         "years_experience": 8,
         "primary_skills": ["Python", "Go", "Rust"],
         "domain": "backend",
+        "resume_text": "Senior Backend Engineer with 8 years experience. Built APIs, optimized databases, reviewed code. Skills: Python, Go, Rust, Docker.",
     }
 
 
@@ -60,15 +62,16 @@ class TestGetFieldsForCheck:
             "years_required",
             "primary_skills",
             "title",
+            "responsibilities",
         }
 
     def test_seniority_years_returns_only_seniority_and_years(self) -> None:
         fields = _get_fields_for_check("seniority_years")
         assert set(fields) == {"seniority", "years_required"}
 
-    def test_resume_job_alignment_returns_skills_and_seniority(self) -> None:
+    def test_resume_job_alignment_returns_skills_seniority_and_responsibilities(self) -> None:
         fields = _get_fields_for_check("resume_job_alignment")
-        assert set(fields) == {"primary_skills", "seniority"}
+        assert set(fields) == {"primary_skills", "seniority", "responsibilities"}
 
     def test_domain_consistency_returns_only_domain(self) -> None:
         fields = _get_fields_for_check("domain_consistency")

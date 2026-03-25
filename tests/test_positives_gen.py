@@ -30,7 +30,8 @@ Seniority: Senior
 YearsRequired: 4-6
 Domain: backend
 PrimarySkills: Python, PostgreSQL, Docker
-SecondarySkills: Redis, Kubernetes"""
+SecondarySkills: Redis, Kubernetes
+Responsibilities: Design scalable microservices; Lead database optimization; Mentor junior engineers"""
         result = parse_skeleton_response(response)
 
         assert result["title"] == "Senior Backend Engineer"
@@ -39,6 +40,7 @@ SecondarySkills: Redis, Kubernetes"""
         assert result["domain"] == "backend"
         assert result["primary_skills"] == ["Python", "PostgreSQL", "Docker"]
         assert result["secondary_skills"] == ["Redis", "Kubernetes"]
+        assert result["responsibilities"] == ["Design scalable microservices", "Lead database optimization", "Mentor junior engineers"]
 
     def test_parses_skills_as_list(self) -> None:
         """Test that skills are parsed as lists."""
@@ -47,13 +49,16 @@ Seniority: Mid
 YearsRequired: 3
 Domain: frontend
 PrimarySkills: JavaScript, React, TypeScript
-SecondarySkills: CSS, Webpack"""
+SecondarySkills: CSS, Webpack
+Responsibilities: Build responsive interfaces; Collaborate with designers; Write unit tests"""
         result = parse_skeleton_response(response)
 
         assert isinstance(result["primary_skills"], list)
         assert isinstance(result["secondary_skills"], list)
+        assert isinstance(result["responsibilities"], list)
         assert result["primary_skills"] == ["JavaScript", "React", "TypeScript"]
         assert result["secondary_skills"] == ["CSS", "Webpack"]
+        assert result["responsibilities"] == ["Build responsive interfaces", "Collaborate with designers", "Write unit tests"]
 
     def test_missing_optional_field_defaults_empty(self) -> None:
         """Test that missing fields default to empty string or list."""
@@ -61,10 +66,12 @@ SecondarySkills: CSS, Webpack"""
 Seniority: Junior
 YearsRequired: 2
 Domain: data
-PrimarySkills: Python, SQL"""
+PrimarySkills: Python, SQL
+Responsibilities: Analyze datasets; Generate reports; Support senior analysts"""
         result = parse_skeleton_response(response)
 
         assert result["secondary_skills"] == []
+        assert result["responsibilities"] == ["Analyze datasets", "Generate reports", "Support senior analysts"]
 
     def test_raises_on_empty_response(self) -> None:
         """Test that empty response raises ValueError."""
@@ -147,6 +154,7 @@ class TestBuildSkeletonPrompt:
         assert "Domain:" in prompt
         assert "PrimarySkills:" in prompt
         assert "SecondarySkills:" in prompt
+        assert "Responsibilities:" in prompt
 
     def test_includes_instruction_to_output_only_fields(self) -> None:
         """Test that prompt instructs to output only the fields."""
@@ -167,7 +175,8 @@ Seniority: Senior
 YearsRequired: 5-7
 Domain: backend
 PrimarySkills: Python, PostgreSQL
-SecondarySkills: Docker, Kubernetes"""
+SecondarySkills: Docker, Kubernetes
+Responsibilities: Design scalable APIs; Review code; Optimize databases"""
 
         result = generate_job_skeleton("test resume")
 
@@ -175,6 +184,7 @@ SecondarySkills: Docker, Kubernetes"""
         assert result["title"] == "Senior Backend Engineer"
         assert result["seniority"] == "Senior"
         assert result["domain"] == "backend"
+        assert result["responsibilities"] == ["Design scalable APIs", "Review code", "Optimize databases"]
         # Verify Ollama was called
         assert mock_ollama.call_count == 1
 
@@ -194,7 +204,8 @@ Seniority: Mid
 YearsRequired: 3
 Domain: frontend
 PrimarySkills: JavaScript, React
-SecondarySkills: CSS"""
+SecondarySkills: CSS
+Responsibilities: Build UI components; Write tests; Collaborate with backend team"""
 
         generate_job_skeleton("test resume", model="custom-model")
 

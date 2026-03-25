@@ -40,6 +40,7 @@ class JobSkeleton(TypedDict):
     domain: str  # backend/frontend/fullstack/data
     primary_skills: list[str]  # Parsed from comma-separated string
     secondary_skills: list[str]
+    responsibilities: list[str]  # 3–5 bullet-point responsibilities
 
 
 def _build_skeleton_prompt(resume_text: str) -> str:
@@ -54,6 +55,7 @@ YearsRequired: [4-6]
 Domain: [backend/frontend/fullstack/data]
 PrimarySkills: [skill1, skill2, skill3]
 SecondarySkills: [skill4, skill5]
+Responsibilities: [responsibility1; responsibility2; responsibility3]
 
 Do not add explanation, formatting, or extra text."""
 
@@ -83,13 +85,14 @@ def parse_skeleton_response(response: str) -> dict:
         Domain: backend
         PrimarySkills: Python, PostgreSQL, Docker
         SecondarySkills: Redis, Kubernetes
+        Responsibilities: resp1; resp2; resp3
 
     Args:
         response: Raw LLM response string.
 
     Returns:
         Dict with keys: title, seniority, years_required, domain,
-        primary_skills, secondary_skills. Missing fields default to
+        primary_skills, secondary_skills, responsibilities. Missing fields default to
         empty string or empty list.
 
     Raises:
@@ -102,6 +105,7 @@ def parse_skeleton_response(response: str) -> dict:
         "domain": "domain",
         "primaryskills": "primary_skills",
         "secondaryskills": "secondary_skills",
+        "responsibilities": "responsibilities",
     }
 
     stripped = response.strip()
@@ -122,6 +126,11 @@ def parse_skeleton_response(response: str) -> dict:
     def split_skills(s: str) -> list[str]:
         return [skill.strip() for skill in s.split(",") if skill.strip()]
 
+    def split_responsibilities(s: str) -> list[str]:
+        import re as _re
+        items = _re.split(r"[;,]", s)
+        return [item.strip() for item in items if item.strip()]
+
     return {
         "title": raw.get("title", ""),
         "seniority": raw.get("seniority", ""),
@@ -129,6 +138,7 @@ def parse_skeleton_response(response: str) -> dict:
         "domain": raw.get("domain", ""),
         "primary_skills": split_skills(raw.get("primaryskills", "")),
         "secondary_skills": split_skills(raw.get("secondaryskills", "")),
+        "responsibilities": split_responsibilities(raw.get("responsibilities", "")),
     }
 
 
@@ -147,7 +157,7 @@ def generate_job_skeleton(resume_text: str, model: str = OLLAMA_MODEL) -> dict:
 
     Returns:
         JobSkeleton dict with keys: title, seniority, years_required,
-        domain, primary_skills, secondary_skills.
+        domain, primary_skills, secondary_skills, responsibilities.
 
     Raises:
         ValueError: If the LLM response cannot be parsed.

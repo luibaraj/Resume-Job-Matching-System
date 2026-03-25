@@ -107,6 +107,7 @@ def build_resume_info(row: dict) -> ResumeInfo:
         "years_experience": years,
         "primary_skills": primary_skills,
         "domain": domain,
+        "resume_text": resume_text,
     }
 
 
@@ -116,19 +117,21 @@ def format_job_for_embedding(job: dict) -> str:
 
     Args:
         job: JobSkeleton dict with keys: title, seniority, years_required,
-             domain, primary_skills, secondary_skills.
+             domain, primary_skills, secondary_skills, responsibilities.
 
     Returns:
         Embedding-ready plain-text string.
     """
     primary_skills_str = ", ".join(job.get("primary_skills", []))
     secondary_skills_str = ", ".join(job.get("secondary_skills", []))
+    responsibilities_str = "; ".join(job.get("responsibilities", []))
 
     return (
         f"{job['title']}. {job['seniority']} level. Domain: {job['domain']}. "
         f"Requires {job['years_required']} years of experience. "
         f"Skills: {primary_skills_str}. "
-        f"Additional skills: {secondary_skills_str}."
+        f"Additional skills: {secondary_skills_str}. "
+        f"Responsibilities: {responsibilities_str}."
     )
 
 
@@ -200,6 +203,7 @@ def main():
                 "domain": job.get("domain", ""),
                 "primary_skills": "; ".join(job.get("primary_skills", [])),
                 "secondary_skills": "; ".join(job.get("secondary_skills", [])),
+                "responsibilities": "; ".join(job.get("responsibilities", [])),
                 "resume_seniority": resume_seniority,
                 "resume_domain": resume_domain,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -225,6 +229,7 @@ def main():
             "domain",
             "primary_skills",
             "secondary_skills",
+            "responsibilities",
             "resume_seniority",
             "resume_domain",
             "generated_at",

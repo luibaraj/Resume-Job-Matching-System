@@ -58,9 +58,10 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
             "years_required",
             "primary_skills",
             "title",
+            "responsibilities",
         ],
         "seniority_years": ["seniority", "years_required"],
-        "resume_job_alignment": ["primary_skills", "seniority"],
+        "resume_job_alignment": ["primary_skills", "seniority", "responsibilities"],
         "domain_consistency": ["domain"],
     }
     return field_map.get(failed_check, [])
@@ -79,6 +80,7 @@ def _format_fields_for_prompt(job: JobSkeleton, fields: list[str]) -> str:
         "domain": f"Domain: {job['domain']}",
         "primary_skills": f"PrimarySkills: {', '.join(job['primary_skills'])}",
         "secondary_skills": f"SecondarySkills: {', '.join(job['secondary_skills'])}",
+        "responsibilities": f"Responsibilities: {'; '.join(job['responsibilities'])}",
     }
     for field in fields:
         if field in field_map:
@@ -137,7 +139,8 @@ def _build_repair_prompt(
             "- Domain must be one of: backend, frontend, fullstack, data\n"
             "- YearsRequired must be a number between 1 and 20 (e.g., '4-6' or '5')\n"
             "- PrimarySkills must have 2 to 4 items\n"
-            "- Title must be a valid job title (non-empty)"
+            "- Title must be a valid job title (non-empty)\n"
+            "- Responsibilities must have 3 to 5 non-empty items (semicolon-separated)"
         )
     elif failed_check == "seniority_years":
         fix_instruction = (
@@ -150,9 +153,10 @@ def _build_repair_prompt(
         )
     elif failed_check == "resume_job_alignment":
         fix_instruction = (
-            "Fix skills and seniority so the job aligns with the resume:\n"
+            "Fix skills, seniority, and responsibilities so the job aligns with the resume:\n"
             "- At least 2 of the resume's primary skills must appear in PrimarySkills\n"
             "- Job seniority must be within ±1 level of resume seniority\n"
+            "- Each responsibility must align with at least one area of work in the resume\n"
             f"Resume seniority: {resume_info['seniority']}\n"
             f"Resume primary skills: {', '.join(resume_info['primary_skills'])}"
         )
@@ -197,6 +201,8 @@ def _build_repair_prompt(
                 format_hints.append("PrimarySkills: skill1, skill2, skill3")
             elif field == "secondary_skills":
                 format_hints.append("SecondarySkills: skill4, skill5")
+            elif field == "responsibilities":
+                format_hints.append("Responsibilities: [resp1; resp2; resp3]")
         format_template = "\n".join(format_hints)
 
         prompt = (

@@ -42,6 +42,7 @@ def sample_job() -> JobSkeleton:
         "domain": "backend",
         "primary_skills": ["Python", "PostgreSQL"],
         "secondary_skills": ["Docker", "Redis"],
+        "responsibilities": ["Design scalable APIs", "Lead database optimization", "Mentor junior engineers"],
     }
 
 
@@ -53,6 +54,7 @@ def sample_resume_info() -> ResumeInfo:
         "years_experience": 8,
         "primary_skills": ["Python", "Go", "PostgreSQL"],
         "domain": "backend",
+        "resume_text": "Senior Backend Engineer at TechCorp with 8 years experience. Designed microservices, optimized databases, led teams. Skills: Python, Go, PostgreSQL, Docker, AWS.",
     }
 
 
@@ -243,7 +245,8 @@ class TestBuildResumeJobAlignmentPrompt:
     def test_includes_resume_and_job_info(self) -> None:
         """Test that prompt includes both resume and job info."""
         prompt = _build_resume_job_alignment_prompt(
-            "Senior", 8, ["Python", "Go"], "Senior", "5-7", ["Python", "PostgreSQL"]
+            "Senior", 8, ["Python", "Go"], "Senior backend engineer with 8 years experience",
+            "Senior", "5-7", ["Python", "PostgreSQL"], ["Design APIs", "Optimize DBs", "Lead teams"]
         )
         assert "Resume" in prompt or "resume" in prompt
         assert "Senior" in prompt
@@ -252,7 +255,8 @@ class TestBuildResumeJobAlignmentPrompt:
     def test_includes_skill_overlap_rule(self) -> None:
         """Test that prompt mentions skill overlap rule."""
         prompt = _build_resume_job_alignment_prompt(
-            "Mid", 5, ["JavaScript"], "Mid", "3", ["JavaScript", "React"]
+            "Mid", 5, ["JavaScript"], "Mid-level frontend engineer with 5 years experience",
+            "Mid", "3", ["JavaScript", "React"], ["Build UIs", "Write tests", "Collaborate"]
         )
         assert "2" in prompt or "skill" in prompt.lower()
 

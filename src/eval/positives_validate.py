@@ -47,6 +47,7 @@ class ResumeInfo(TypedDict):
     years_experience: int  # Total years of professional experience
     primary_skills: list[str]
     domain: str  # backend / frontend / fullstack / data
+    resume_text: str  # Full resume text, used for responsibilities alignment
 
 
 def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
@@ -178,6 +179,7 @@ Check format compliance. Verify:
 4. Domain is one of: backend, frontend, fullstack, data
 5. PrimarySkills has 2–4 items (comma-separated)
 6. No fields are missing
+7. Responsibilities has 3–5 non-empty items
 
 Respond ONLY with:
 - PASS if all checks succeed
@@ -220,9 +222,11 @@ def _build_resume_job_alignment_prompt(
     resume_seniority: str,
     resume_years: int,
     resume_skills: list[str],
+    resume_text: str,
     job_seniority: str,
     job_years: str,
     job_skills: list[str],
+    job_responsibilities: list[str],
 ) -> str:
     """
     Build the resume-job alignment prompt.
@@ -231,9 +235,11 @@ def _build_resume_job_alignment_prompt(
         resume_seniority: Resume seniority level (e.g., "Mid").
         resume_years: Resume years of experience (integer).
         resume_skills: Resume primary skills list.
+        resume_text: Full resume text for responsibilities alignment.
         job_seniority: Job skeleton seniority.
         job_years: Job skeleton years_required raw string.
         job_skills: Job skeleton primary_skills list.
+        job_responsibilities: Job skeleton responsibilities list.
 
     Returns:
         Prompt string ready for LLM call.
@@ -242,17 +248,21 @@ def _build_resume_job_alignment_prompt(
 - Seniority: {resume_seniority}
 - Experience: {resume_years} years
 - Primary Skills: {", ".join(resume_skills)}
+- Resume text:
+{resume_text}
 
 Generated Job:
 - Seniority: {job_seniority}
 - YearsRequired: {job_years}
 - PrimarySkills: {", ".join(job_skills)}
+- Responsibilities: {"; ".join(job_responsibilities)}
 
 Check resume-job alignment. Verify:
 1. At least 2 of the resume's skills appear in the job's skills
 2. Job seniority is within ±1 level of resume seniority
 3. Job years required ≤ resume experience + 2 (allow 2-year stretch)
-4. Overall, is this a plausible match for this candidate?
+4. Each job responsibility aligns with at least one area of work described in the resume
+5. Overall, is this a plausible match for this candidate?
 
 Respond ONLY with:
 - PASS if all checks succeed
@@ -301,7 +311,8 @@ def validate_structural(
 
     Verifies that all required fields are present, title is non-gibberish,
     seniority is one of the four valid levels, years_required is 0–20,
-    domain is one of the four valid domains, and primary_skills has 2–4 items.
+    domain is one of the four valid domains, primary_skills has 2–4 items,
+    and responsibilities has 3–5 items.
 
     Args:
         job: JobSkeleton dict from Step 1.
@@ -321,7 +332,8 @@ def validate_structural(
         f"YearsRequired: {job['years_required']}\n"
         f"Domain: {job['domain']}\n"
         f"PrimarySkills: {', '.join(job['primary_skills'])}\n"
-        f"SecondarySkills: {', '.join(job['secondary_skills'])}"
+        f"SecondarySkills: {', '.join(job['secondary_skills'])}\n"
+        f"Responsibilities: {'; '.join(job['responsibilities'])}"
     )
 
     prompt = _build_structural_prompt(job_text)
@@ -416,9 +428,11 @@ def validate_resume_job_alignment(
         resume_info["seniority"],
         resume_info["years_experience"],
         resume_info["primary_skills"],
+        resume_info["resume_text"],
         job["seniority"],
         job["years_required"],
         job["primary_skills"],
+        job["responsibilities"],
     )
     raw_response = _call_ollama(prompt, model)
     logger.debug("Resume-job alignment validation response: %s", raw_response)
