@@ -8,6 +8,9 @@ voyageai>=0.3.0
 numpy>=1.26.0
 google-genai>=1.0.0
 
+# Data Processing
+pandas>=2.0.0
+
 # HTML Parsing
 beautifulsoup4>=4.12.0
 
