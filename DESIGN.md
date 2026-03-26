@@ -170,14 +170,15 @@ fix prompt, parses via `parse_skeleton_response`, and re-runs all 4 validations.
   attempt 2 targets the new failing fields.
 - **Discard**: After 2 failed attempts, returns `RepairResult(success=False, job=None)`.
 
-| `failed_check`         | Fields sent to LLM                                  | Fix instruction                                           |
-|------------------------|-----------------------------------------------------|-----------------------------------------------------------|
-| `structural`           | `seniority`, `domain`, `years_required`, `primary_skills`, `title` | Fix enum values, years range 1–20, skills count 2–4 |
-| `seniority_years`      | `seniority`, `years_required`                       | Fix YearsRequired to bracket: Junior 0–2, Mid 2–5, Senior 4–8, Staff 6+ |
-| `resume_job_alignment` | `primary_skills`, `seniority`                       | Fix skills (≥2 overlap with resume), seniority (±1 of resume level) |
-| `domain_consistency`   | `domain`                                            | Fix domain to match resume domain + title                 |
+| `failed_check`         | Fields sent to LLM                                                 | Fix instruction                                                         |
+| ---------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `structural`           | `seniority`, `domain`, `years_required`, `primary_skills`, `title` | Fix enum values, years range 1–20, skills count 2–4                     |
+| `seniority_years`      | `seniority`, `years_required`                                      | Fix YearsRequired to bracket: Junior 0–2, Mid 2–5, Senior 4–8, Staff 6+ |
+| `resume_job_alignment` | `primary_skills`, `seniority`                                      | Fix skills (≥2 overlap with resume), seniority (±1 of resume level)     |
+| `domain_consistency`   | `domain`                                                           | Fix domain to match resume domain + title                               |
 
 **Error handling**:
+
 - `ValueError` from `parse_skeleton_response` is caught and counted as a failed attempt
 - `ollama.RequestError` / `ollama.ResponseError` propagate to the caller
 
@@ -254,22 +255,51 @@ def run_pipeline(
 
 ## Purpose
 
-Synthetic negatives are (resume, job_description) pairs where the job description is intentionally mismatched to the resume in specific ways. Used in eval to test retrieval and reranking correctly reject non-matching jobs.
+Synthetic negatives are (r) pairs where the job description is intentionally mismatched to the resume in specific ways. Used in eval to test retrieval and reranking correctly reject non-matching jobs.
 
-Currently implemented: **Seniority Mismatch**
+Three mismatch types are fully implemented: **seniority**, **domain**, and **responsibility**.
 
-Future types: skill gaps, industry mismatch, experience overqualification, etc.
+## Mismatch Types
 
-## Seniority Mismatch Negatives
+Each negative type creates a different dimension of incompatibility while maintaining plausibility. The following table summarizes what differs and what remains consistent:
+
+| Mismatch Type  | What differs                            | What stays the same                                            |
+| -------------- | --------------------------------------- | -------------------------------------------------------------- |
+| seniority      | seniority level, years_required         | domain, primary skills, secondary skills, responsibilities     |
+| domain         | domain, job title                       | seniority level, years_required, skills are domain-appropriate |
+| responsibility | responsibilities, specific skills focus | seniority level, domain, years_required                        |
+
+### Seniority Mismatch
 
 A job description that is realistic in domain and skills but targets a mismatched seniority level:
 
 - **Junior candidate** → Senior or Staff job (overqualification, cannot handle complexity)
 - **Mid candidate** → Junior or Staff job (extreme under/over qualification)
-- **Senior candidate** → Junior job (underqualification, would be bored or overqualified)
+- **Senior candidate** → Junior job (underqualification, would be bored)
 - **Staff candidate** → Junior or Mid job (underqualification)
 
-The seniority gap must be ≥1 level for Mid, ≥2 levels for other levels (to ensure true mismatch).
+The seniority gap must be ≥1 level for Mid-level candidates, ≥2 levels for Junior/Senior/Staff (to ensure true mismatch).
+
+### Domain Mismatch
+
+A job description with the same seniority and years as the resume, but in a completely different engineering domain:
+
+- **backend engineer** → frontend or data role
+- **frontend engineer** → backend or data role
+- **fullstack engineer** → data role
+- **data engineer** → frontend or backend role
+
+A domain shift is valid only if it is not "adjacent" (backend ↔ fullstack and frontend ↔ fullstack are too similar to count as true mismatches). Data has no adjacency and can mismatch with any other domain.
+
+### Responsibility Mismatch
+
+A job description with the same seniority, domain, and years as the resume, but with a different sub-role or specialization within that domain:
+
+- **backend engineer focused on API design** → backend engineer focused on database optimization
+- **frontend engineer focused on component libraries** → frontend engineer focused on mobile web
+- **data engineer focused on warehousing** → data engineer focused on real-time streaming
+
+The responsibilities must describe work the candidate demonstrably does not do, verified by the validation step.
 
 ## Architecture
 
@@ -277,69 +307,101 @@ Follows the same **generate → validate → repair** pattern as positives.
 
 ### Step 1: Skeleton Generation (`src/eval/negative_gen/negatives_gen.py`)
 
-**Input**: Resume text, resume seniority level
+**Input**: Resume text, resume seniority level, mismatch type, resume domain (for domain/responsibility types)
 
-**Output**: `(JobSkeleton dict, target_seniority str)` tuple
-- Tuple is used because `get_target_seniority` uses `random.choice`; repair needs the exact target that was used
+**Output**: `(JobSkeleton dict, mismatch_context dict)` tuple
+
+- Tuple is used because target selection uses `random.choice`; repair needs the exact target that was chosen
 
 **Processing**:
 
-1. `get_target_seniority(resume_seniority)` → pick a mismatched target seniority
-   - Junior → Senior or Staff (random)
-   - Mid → Junior or Staff (random)
-   - Senior → Junior
-   - Staff → Junior or Mid (random)
-2. `_years_range_for_seniority(target_seniority)` → get pre-computed years (e.g., "4-7" for Senior)
-3. Build prompt embedding target_seniority and years as hard constraints; resume text provides domain/skills context only
+1. Dispatch based on `mismatch_type`:
+   - **seniority**: `get_target_seniority(resume_seniority)` → pick a mismatched target seniority
+     - Junior → Senior or Staff (random)
+     - Mid → Junior or Staff (random)
+     - Senior → Junior
+     - Staff → Junior or Mid (random)
+   - **domain**: `get_target_domain(resume_domain)` → pick a mismatched target domain (excluding adjacent)
+   - **responsibility**: same seniority/domain, diverge sub-role within domain
+2. `_years_range_for_seniority(target_seniority)` → get canonical years for target (e.g., "4-7" for Senior)
+3. Build prompt with hard constraints for the mismatch dimension; resume text provides context for non-mismatch dimensions
 4. Call Ollama with same config as positives_gen (`SKELETON_MAX_TOKENS = 200`)
 5. Parse response into JobSkeleton dict
-6. Return tuple: `(skeleton dict, target_seniority str)`
+6. Return tuple: `(skeleton dict, mismatch_context)` where context carries `target_seniority`, `target_domain`, and/or `resume_domain` depending on type
+
+Three prompt builders:
+
+- `_build_mismatched_skeleton_prompt(resume_text, target_seniority, years_range)` — seniority hard-constrained; domain/skills from resume context
+- `_build_domain_mismatch_prompt(resume_text, resume_seniority, target_domain)` — domain hard-constrained; seniority matches resume
+- `_build_responsibility_mismatch_prompt(resume_text, resume_seniority, resume_domain)` — seniority+domain match resume; sub-role diverges
+
+Canonical years ranges by seniority: Junior (0-2), Mid (2-4), Senior (4-7), Staff (7-10)
 
 **Error handling**:
+
 - Same as positives_gen: ValueError on unparseable response, Ollama errors propagate
 
 ### Step 2: Validation (`src/eval/negative_gen/negatives_validate.py`)
 
-**Input**: `JobSkeleton` dict from Step 1, `ResumeInfo`, `target_seniority` string
+**Input**: `JobSkeleton` dict from Step 1, `ResumeInfo`, mismatch_type string
 
 **Output**: Validation outcome dict with keys `passed` (bool), `failed_check` (str | None), `reason` (str | None)
 
-**Processing**: Four checks run in sequence; short-circuit on first failure.
+**Processing**: Entry point is `validate_mismatched_skeleton(job, resume_info, model, mismatch_type)`, which dispatches to a type-specific validation chain:
 
-| Check | Type | Logic |
-|---|---|---|
-| `structural` | LLM | Reused from positives_validate — all 7 fields present, well-formed, in ranges |
-| `seniority_years` | Deterministic | Reused from positives_validate — skeleton's seniority/years internally consistent |
-| `seniority_mismatch` | Deterministic (NEW) | Job seniority gap must meet minimum: Junior resume ≥2, Mid ≥1, Senior ≥2, Staff ≥2 |
-| `skill_domain_overlap` | LLM (NEW) | ≥2 shared skills, same/adjacent domain, realistic responsibilities — ignoring seniority |
+| mismatch_type    | Validation chain                                                         |
+| ---------------- | ------------------------------------------------------------------------ |
+| `seniority`      | structural → seniority_years → seniority_mismatch → skill_domain_overlap |
+| `domain`         | structural → seniority_years → domain_mismatch                           |
+| `responsibility` | structural → seniority_years → responsibility_mismatch                   |
+
+Each check runs in sequence; pipeline short-circuits on the first failure.
+
+All checks and their logic:
+
+| Check                     | Type          | Logic                                                                                                                                                        |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `structural`              | LLM           | All 7 fields present, well-formed, in ranges (same as positives)                                                                                             |
+| `seniority_years`         | Deterministic | Skeleton's seniority and years_required are internally consistent (same as positives)                                                                        |
+| `seniority_mismatch`      | Deterministic | Job seniority gap must meet minimum: Mid resume ≥1 level gap, Junior/Senior/Staff ≥2 level gap                                                               |
+| `domain_mismatch`         | Deterministic | Job domain ≠ resume domain AND job domain is not adjacent to resume domain (backend ↔ fullstack and frontend ↔ fullstack are adjacent)                       |
+| `responsibility_mismatch` | LLM           | Job responsibilities describe work the candidate demonstrably does not do, verified against resume text                                                      |
+| `skill_domain_overlap`    | LLM           | ≥2 shared skills, same/adjacent domain, realistic responsibilities for the seniority level — ignoring seniority distance (used only for seniority negatives) |
 
 **Key differences from positives**:
-- `validate_resume_job_alignment` NOT reused (it enforces seniority proximity ±1, which negatives violate)
-- `validate_domain_consistency` absorbed into `skill_domain_overlap`
-- New `seniority_mismatch` check runs early (deterministic, cheap) before expensive LLM check
+
+- `validate_resume_job_alignment` NOT reused (it enforces seniority proximity ±1, which negatives intentionally violate)
+- `validate_domain_consistency` is NOT reused; `domain_mismatch` is deterministic and checks adjacency instead
+- New `responsibility_mismatch` check verifies responsibilities are plausibly unrelated to the resume
+- `skill_domain_overlap` replaces positives' alignment logic; verifies plausibility without enforcing seniority proximity
 
 **Token budget**: `VALIDATION_MAX_TOKENS = 50` (same as positives)
 
 ### Step 3: Failure Recovery (`src/eval/negative_gen/negatives_repair.py`)
 
-**Input**: Failed `JobSkeleton`, `failed_check` string, `reason` string, `ResumeInfo`, **`target_seniority`** string (from generation)
+**Input**: Failed `JobSkeleton`, `failed_check` string, `reason` string, `ResumeInfo`, **`mismatch_context`** dict (from generation), **`mismatch_type`** string
 
 **Output**: `RepairResult` dict: `success` (bool), `job` (JobSkeleton | None), `attempts` (int), `discard_reason` (str | None)
 
 **Retry strategy**: Up to 2 repair attempts, same as positives_repair.
 
-**Critical difference**: `target_seniority` is passed as a parameter (not re-computed via `get_target_seniority`) to ensure the repair targets the same seniority that generation used.
+**Critical difference**: `mismatch_context` is passed as a parameter (not re-computed via `get_target_seniority` or `get_target_domain`) to ensure repair targets the same mismatch goal that generation chose.
 
-| `failed_check`         | Fields sent to LLM | Fix instruction |
-|------------------------|---|---|
-| `structural`           | `seniority`, `domain`, `years_required`, `primary_skills`, `title` | Fix enum values, years range, skills count (same as positives) |
-| `seniority_years`      | `seniority`, `years_required` | Fix YearsRequired to bracket (same as positives) |
-| `seniority_mismatch`   | `seniority`, `years_required`, `title` | Fix seniority to target (injected into prompt) and years to target's bracket |
-| `skill_domain_overlap` | `primary_skills`, `secondary_skills`, `domain`, `responsibilities` | Fix skills/domain to overlap with resume (don't touch seniority) |
+Field targeting by failed check (which fields the LLM regenerates):
+
+| `failed_check`            | Fields sent to LLM                                                         | Fix instruction                                                                       |
+| ------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `structural`              | seniority, domain, years_required, primary_skills, title, responsibilities | Fix enum values, years range, skills count, responsibilities count                    |
+| `seniority_years`         | seniority, years_required                                                  | Fix YearsRequired to bracket for target seniority (same as positives)                 |
+| `seniority_mismatch`      | seniority, years_required, title                                           | Set seniority to target_seniority from mismatch_context and years to matching bracket |
+| `domain_mismatch`         | domain, title                                                              | Set domain to target_domain from mismatch_context; update title to match              |
+| `responsibility_mismatch` | responsibilities, primary_skills, secondary_skills                         | Rewrite responsibilities for a different sub-role within same domain                  |
+| `skill_domain_overlap`    | primary_skills, secondary_skills, domain, responsibilities                 | Fix skills/domain to overlap with resume; do not change seniority                     |
 
 **Temperature and attempt strategy**:
-- Attempt 1: standard temperature, targeted fields
-- Attempt 2: lower temperature (0.3), explicit enum hints, targeted fields; may shift to new failing check
+
+- Attempt 1: `GENERATION_TEMPERATURE = 0.7`, targeted fields
+- Attempt 2: `0.3`, explicit enum hints in prompt, targeted fields; may shift to new failing check if first attempt changed the failure signature
 - After 2 failures: discard
 
 **Token budget**: `REPAIR_MAX_TOKENS = 200` (same as positives)
@@ -349,6 +411,7 @@ Follows the same **generate → validate → repair** pattern as positives.
 ## Shared Types and Utilities
 
 **Owned by positives_validate, imported by negatives**:
+
 - `JobSkeleton` — TypedDict (7 fields)
 - `ResumeInfo` — TypedDict
 - `ValidationResult` — TypedDict for check results
@@ -360,6 +423,7 @@ Follows the same **generate → validate → repair** pattern as positives.
 - Seniority brackets: Junior (0-2), Mid (0-5), Senior (2-8), Staff (6+)
 
 **Owned by negatives, unique to negatives**:
+
 - `SENIORITY_ORDER` — ["Junior", "Mid", "Senior", "Staff"]
 - `get_target_seniority(resume_seniority)` — Pick mismatched target
 - `_years_range_for_seniority(seniority)` — Map to canonical range
