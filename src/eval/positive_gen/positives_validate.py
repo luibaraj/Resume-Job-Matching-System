@@ -28,6 +28,7 @@ from config import (
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
+from eval.eval_utils import call_ollama_validate
 from .positives_gen import JobSkeleton
 
 logger = logging.getLogger(__name__)
@@ -50,18 +51,6 @@ class ResumeInfo(TypedDict):
     resume_text: str  # Full resume text, used for responsibilities alignment
 
 
-def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
-    """Call Ollama chat endpoint and return response content."""
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": GENERATION_TEMPERATURE,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": VALIDATION_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
 
 
 def _parse_years_required(years_str: str) -> int:
@@ -337,7 +326,7 @@ def validate_structural(
     )
 
     prompt = _build_structural_prompt(job_text)
-    raw_response = _call_ollama(prompt, model)
+    raw_response = call_ollama_validate(prompt, model)
     logger.debug("Structural validation response: %s", raw_response)
 
     result = _parse_validation_response(raw_response)
@@ -434,7 +423,7 @@ def validate_resume_job_alignment(
         job["primary_skills"],
         job["responsibilities"],
     )
-    raw_response = _call_ollama(prompt, model)
+    raw_response = call_ollama_validate(prompt, model)
     logger.debug("Resume-job alignment validation response: %s", raw_response)
 
     result = _parse_validation_response(raw_response)
@@ -475,7 +464,7 @@ def validate_domain_consistency(
         job["domain"],
         job["title"],
     )
-    raw_response = _call_ollama(prompt, model)
+    raw_response = call_ollama_validate(prompt, model)
     logger.debug("Domain consistency validation response: %s", raw_response)
 
     result = _parse_validation_response(raw_response)

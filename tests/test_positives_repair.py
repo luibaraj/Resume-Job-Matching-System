@@ -164,7 +164,7 @@ class TestMergeRepairedFields:
 class TestRepairJobSkeleton:
     """Tests for the main repair orchestrator."""
 
-    @patch("eval.positive_gen.positives_repair._call_ollama")
+    @patch("eval.positive_gen.positives_repair.call_ollama_repair")
     @patch("eval.positive_gen.positives_repair.validate_job_skeleton")
     def test_success_on_first_attempt(
         self,
@@ -193,7 +193,7 @@ class TestRepairJobSkeleton:
         assert result["discard_reason"] is None
         assert result["job"]["years_required"] == "5"
 
-    @patch("eval.positive_gen.positives_repair._call_ollama")
+    @patch("eval.positive_gen.positives_repair.call_ollama_repair")
     @patch("eval.positive_gen.positives_repair.validate_job_skeleton")
     def test_discard_after_two_failed_attempts(
         self,
@@ -225,7 +225,7 @@ class TestRepairJobSkeleton:
         assert result["attempts"] == 2
         assert result["discard_reason"] == "years still out of range"
 
-    @patch("eval.positive_gen.positives_repair._call_ollama")
+    @patch("eval.positive_gen.positives_repair.call_ollama_repair")
     @patch("eval.positive_gen.positives_repair.validate_job_skeleton")
     def test_uses_lower_temperature_on_attempt_2(
         self,
@@ -261,7 +261,7 @@ class TestRepairJobSkeleton:
         second_call_temp = mock_ollama.call_args_list[1][1].get("temperature", 0.3)
         assert first_call_temp > second_call_temp
 
-    @patch("eval.positive_gen.positives_repair._call_ollama")
+    @patch("eval.positive_gen.positives_repair.call_ollama_repair")
     @patch("eval.positive_gen.positives_repair.validate_job_skeleton")
     def test_updates_failed_check_between_attempts(
         self,

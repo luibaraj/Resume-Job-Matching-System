@@ -15,35 +15,30 @@ All LLM calls use a locally hosted LLaMA 3.2 3B model via Ollama.
 import logging
 import sys
 from pathlib import Path
-from typing import TypedDict
-
-import ollama
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from config import (
-    GENERATION_TOP_P,
     GENERATION_TEMPERATURE,
     OLLAMA_MODEL,
-    REPAIR_MAX_TOKENS,
+)
+from eval.eval_utils import (
+    _REPAIR_TEMPERATURE_ATTEMPT2,
+    RepairResult,
+    call_ollama_repair,
+    format_fields_for_prompt,
+    merge_repaired_fields,
+    build_attempt1_prompt,
+    build_attempt2_prompt,
 )
 from .positives_gen import JobSkeleton, parse_skeleton_response
 from .positives_validate import ResumeInfo, validate_job_skeleton
 
 logger = logging.getLogger(__name__)
 
-# Lowered temperature for attempt 2 to get more deterministic output.
-# Not in config because it is specific to the escalation behavior of this module.
-_REPAIR_TEMPERATURE_ATTEMPT2: float = 0.3
-
-
-class RepairResult(TypedDict):
-    """Result of the repair loop for a failed JobSkeleton."""
-
-    success: bool  # True if a repaired skeleton passed validation
-    job: JobSkeleton | None  # Repaired skeleton, or None if discarded
-    attempts: int  # Number of repair attempts made (1 or 2)
-    discard_reason: str | None  # Reason for discard; None on success
+# Backwards compatibility: tests may import private names from this module
+_format_fields_for_prompt = format_fields_for_prompt
+_merge_repaired_fields = merge_repaired_fields
 
 
 def _get_fields_for_check(failed_check: str) -> list[str]:
@@ -67,43 +62,6 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
     return field_map.get(failed_check, [])
 
 
-def _format_fields_for_prompt(job: JobSkeleton, fields: list[str]) -> str:
-    """
-    Formats only the specified fields from a JobSkeleton into canonical
-    'Field: value' lines for prompt injection.
-    """
-    lines = []
-    field_map = {
-        "title": f"Title: {job['title']}",
-        "seniority": f"Seniority: {job['seniority']}",
-        "years_required": f"YearsRequired: {job['years_required']}",
-        "domain": f"Domain: {job['domain']}",
-        "primary_skills": f"PrimarySkills: {', '.join(job['primary_skills'])}",
-        "secondary_skills": f"SecondarySkills: {', '.join(job['secondary_skills'])}",
-        "responsibilities": f"Responsibilities: {'; '.join(job['responsibilities'])}",
-    }
-    for field in fields:
-        if field in field_map:
-            lines.append(field_map[field])
-    return "\n".join(lines)
-
-
-def _merge_repaired_fields(
-    original: JobSkeleton, repaired: JobSkeleton, fields: list[str]
-) -> JobSkeleton:
-    """
-    Merges only the repaired field values back into the original skeleton.
-    Fields not in the repair response are kept from original unchanged.
-    Only non-empty repaired values are applied — guards against the parser
-    returning empty defaults for fields the model didn't output.
-    """
-    merged = dict(original)
-    for field in fields:
-        value = repaired.get(field)
-        # Only apply non-empty values — empty means the model didn't output this field
-        if value:
-            merged[field] = value
-    return merged
 
 
 def _build_repair_prompt(
@@ -128,7 +86,7 @@ def _build_repair_prompt(
         The prompt string to send to the LLM
     """
     fields = _get_fields_for_check(failed_check)
-    fields_text = _format_fields_for_prompt(job, fields)
+    fields_text = format_fields_for_prompt(job, fields)
     failure_msg = reason or failed_check
 
     # Build fix instructions per failed_check
@@ -172,89 +130,13 @@ def _build_repair_prompt(
         fix_instruction = "Fix the above fields to pass validation."
 
     if attempt == 1:
-        # Attempt 1: surgical, targeted prompt
-        prompt = (
-            f"The following job fields failed validation.\n"
-            f"\n"
-            f"{fields_text}\n"
-            f"\n"
-            f"Validation failure: {failure_msg}\n"
-            f"\n"
-            f"{fix_instruction}\n"
-            f"\n"
-            f"Output ONLY the corrected fields above, one per line, in the same format.\n"
-            f"Do not output any other fields. Do not add explanation or extra text."
-        )
+        prompt = build_attempt1_prompt(fields_text, failure_msg, fix_instruction)
     else:
-        # Attempt 2: stricter with enum hints and imperative close
-        format_hints = []
-        for field in fields:
-            if field == "seniority":
-                format_hints.append("Seniority: [Junior/Mid/Senior/Staff]")
-            elif field == "domain":
-                format_hints.append("Domain: [backend/frontend/fullstack/data]")
-            elif field == "years_required":
-                format_hints.append("YearsRequired: [e.g., 4-6]")
-            elif field == "title":
-                format_hints.append("Title: [Job Title]")
-            elif field == "primary_skills":
-                format_hints.append("PrimarySkills: skill1, skill2, skill3")
-            elif field == "secondary_skills":
-                format_hints.append("SecondarySkills: skill4, skill5")
-            elif field == "responsibilities":
-                format_hints.append("Responsibilities: [resp1; resp2; resp3]")
-        format_template = "\n".join(format_hints)
-
-        prompt = (
-            f"The following job fields failed validation.\n"
-            f"\n"
-            f"{fields_text}\n"
-            f"\n"
-            f"Validation failure: {failure_msg}\n"
-            f"\n"
-            f"{fix_instruction}\n"
-            f"\n"
-            f"You MUST correct the above failure.\n"
-            f"\n"
-            f"Output ONLY the corrected fields, one per line:\n"
-            f"{format_template}\n"
-            f"\n"
-            f"Do not add explanation, formatting, or extra text. You must correct this."
-        )
+        prompt = build_attempt2_prompt(fields_text, failure_msg, fix_instruction, fields)
 
     return prompt
 
 
-def _call_ollama(
-    prompt: str,
-    model: str = OLLAMA_MODEL,
-    temperature: float = GENERATION_TEMPERATURE,
-) -> str:
-    """
-    Call Ollama chat endpoint and return response content.
-
-    Args:
-        prompt: The prompt to send
-        model: Ollama model name
-        temperature: Sampling temperature (0.0 to 1.0+)
-
-    Returns:
-        The LLM response text
-
-    Raises:
-        ollama.RequestError: If the request fails
-        ollama.ResponseError: If the model returns an error
-    """
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": temperature,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": REPAIR_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
 
 
 def repair_job_skeleton(
@@ -293,7 +175,7 @@ def repair_job_skeleton(
         prompt = _build_repair_prompt(
             current_job, failed_check, reason, attempt, resume_info
         )
-        raw = _call_ollama(prompt, model, temperature)
+        raw = call_ollama_repair(prompt, model, temperature)
 
         try:
             repaired_partial = parse_skeleton_response(raw)
@@ -304,7 +186,7 @@ def repair_job_skeleton(
             continue  # count as failed attempt
 
         # Merge only the repaired fields back into the current skeleton
-        candidate = _merge_repaired_fields(current_job, repaired_partial, fields)
+        candidate = merge_repaired_fields(current_job, repaired_partial, fields)
 
         validation = validate_job_skeleton(candidate, resume_info, model)
 

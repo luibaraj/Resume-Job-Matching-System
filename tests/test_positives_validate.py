@@ -279,7 +279,7 @@ class TestBuildDomainConsistencyPrompt:
 class TestValidateStructural:
     """Tests for validate_structural."""
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_pass_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
         """Test that PASS response is parsed correctly."""
         mock_ollama.return_value = "PASS"
@@ -288,7 +288,7 @@ class TestValidateStructural:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_fail_result(self, mock_ollama: MagicMock, sample_job: JobSkeleton) -> None:
         """Test that FAIL response is parsed correctly."""
         mock_ollama.return_value = "FAIL: invalid seniority"
@@ -412,7 +412,7 @@ class TestNormalizeSkeleton:
 class TestValidateResumeJobAlignment:
     """Tests for validate_resume_job_alignment."""
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_pass_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -423,7 +423,7 @@ class TestValidateResumeJobAlignment:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_fail_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -438,7 +438,7 @@ class TestValidateResumeJobAlignment:
 class TestValidateDomainConsistency:
     """Tests for validate_domain_consistency."""
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_pass_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:
@@ -449,7 +449,7 @@ class TestValidateDomainConsistency:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.positive_gen.positives_validate._call_ollama")
+    @patch("eval.positive_gen.positives_validate.call_ollama_validate")
     def test_returns_fail_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, sample_resume_info: ResumeInfo
     ) -> None:

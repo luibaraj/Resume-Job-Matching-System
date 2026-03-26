@@ -22,6 +22,7 @@ from config import (
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
+from eval.eval_utils import call_ollama_validate
 from eval.positive_gen.positives_gen import JobSkeleton
 from eval.positive_gen.positives_validate import (
     ResumeInfo,
@@ -53,18 +54,6 @@ _DOMAIN_ADJACENT: dict[str, set[str]] = {
 }
 
 
-def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
-    """Call Ollama chat endpoint and return response content."""
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": GENERATION_TEMPERATURE,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": VALIDATION_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
 
 
 def validate_seniority_mismatch(
@@ -200,7 +189,7 @@ def validate_skill_domain_overlap(
         job["primary_skills"],
         job["responsibilities"],
     )
-    raw_response = _call_ollama(prompt, model)
+    raw_response = call_ollama_validate(prompt, model)
     logger.debug("Skill-domain overlap validation response: %s", raw_response)
 
     result = _parse_validation_response(raw_response)
@@ -320,7 +309,7 @@ def validate_responsibility_mismatch(
         job["domain"],
         job["seniority"],
     )
-    raw_response = _call_ollama(prompt, model)
+    raw_response = call_ollama_validate(prompt, model)
     logger.debug("Responsibility mismatch validation response: %s", raw_response)
 
     result = _parse_validation_response(raw_response)

@@ -249,7 +249,7 @@ class TestValidateSeniorityMismatch:
 class TestValidateSkillDomainOverlap:
     """Tests for validate_skill_domain_overlap."""
 
-    @patch("eval.negative_gen.negatives_validate._call_ollama")
+    @patch("eval.negative_gen.negatives_validate.call_ollama_validate")
     def test_returns_pass_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, senior_resume_info: ResumeInfo
     ) -> None:
@@ -259,7 +259,7 @@ class TestValidateSkillDomainOverlap:
         assert result["passed"] is True
         assert result["reason"] is None
 
-    @patch("eval.negative_gen.negatives_validate._call_ollama")
+    @patch("eval.negative_gen.negatives_validate.call_ollama_validate")
     def test_returns_fail_result(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, senior_resume_info: ResumeInfo
     ) -> None:
@@ -269,7 +269,7 @@ class TestValidateSkillDomainOverlap:
         assert result["passed"] is False
         assert "Only 1 skill matches" in result["reason"]
 
-    @patch("eval.negative_gen.negatives_validate._call_ollama")
+    @patch("eval.negative_gen.negatives_validate.call_ollama_validate")
     def test_prompt_excludes_seniority_comparison(
         self, mock_ollama: MagicMock, sample_job: JobSkeleton, senior_resume_info: ResumeInfo
     ) -> None:

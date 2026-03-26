@@ -91,7 +91,7 @@ class TestRepairMismatchedSkeleton:
     """Tests for repair_mismatched_skeleton."""
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_success_on_first_attempt(
         self,
@@ -126,7 +126,7 @@ class TestRepairMismatchedSkeleton:
         assert result["discard_reason"] is None
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_discard_after_two_failed_attempts(
         self,
@@ -159,7 +159,7 @@ class TestRepairMismatchedSkeleton:
         assert "Still wrong" in result["discard_reason"]
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_uses_lower_temperature_on_attempt_2(
         self,
@@ -195,7 +195,7 @@ class TestRepairMismatchedSkeleton:
         assert call_2_temp < call_1_temp
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_updates_failed_check_between_attempts(
         self,
@@ -235,7 +235,7 @@ class TestRepairMismatchedSkeleton:
         assert mock_ollama.call_count == 2
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_target_seniority_passed_to_repair_prompt(
         self,
@@ -262,7 +262,7 @@ class TestRepairMismatchedSkeleton:
         assert "Senior" in prompt
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_seniority_mismatch_repair_injects_target_seniority(
         self,
@@ -290,7 +290,7 @@ class TestRepairMismatchedSkeleton:
         assert "MUST" in prompt or "must" in prompt
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_parse_error_counts_as_failed_attempt(
         self,
@@ -321,7 +321,7 @@ class TestRepairMismatchedSkeleton:
         assert result["attempts"] == 2
 
     @patch("eval.negative_gen.negatives_repair.validate_mismatched_skeleton")
-    @patch("eval.negative_gen.negatives_repair._call_ollama")
+    @patch("eval.negative_gen.negatives_repair.call_ollama_repair")
     @patch("eval.negative_gen.negatives_repair.parse_skeleton_response")
     def test_repair_merges_only_targeted_fields(
         self,
