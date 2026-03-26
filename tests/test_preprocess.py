@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-# Add src and scripts to path for imports
+# Add src and scripts/pipeline to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "pipeline"))
 
 from preprocess import (
     _step1_unescape,
