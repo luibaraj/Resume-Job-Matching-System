@@ -43,18 +43,24 @@ class JobSkeleton(TypedDict):
     responsibilities: list[str]  # 3–5 bullet-point responsibilities
 
 
-def _build_skeleton_prompt(resume_text: str) -> str:
-    """Build prompt for generating a job skeleton from a resume."""
+def _build_skeleton_prompt(resume_text: str, resume_seniority: str) -> str:
+    """Build prompt for generating a job skeleton from a resume.
+
+    Args:
+        resume_text: Full resume text.
+        resume_seniority: The candidate's seniority level (e.g., "Senior", "Mid").
+                         This is fixed and must not be changed by the LLM.
+    """
     return f"""Resume: {resume_text}
 
 Generate 1 job description skeleton matching this resume. The job MUST:
-- Have seniority exactly matching the resume's level
+- Use seniority: {resume_seniority}  ← FIXED, do not change
 - Require no more years of experience than the candidate has
 
 Output ONLY these fields, one per line:
 
-Title: [Senior/Mid/Junior] [Role] Engineer
-Seniority: [Senior/Mid/Junior/Staff]
+Title: [{resume_seniority}] [Role] Engineer
+Seniority: {resume_seniority}
 YearsRequired: [4-6]
 Domain: [backend/frontend/fullstack/data]
 PrimarySkills: [skill1, skill2, skill3]
@@ -146,7 +152,11 @@ def parse_skeleton_response(response: str) -> dict:
     }
 
 
-def generate_job_skeleton(resume_text: str, model: str = OLLAMA_MODEL) -> dict:
+def generate_job_skeleton(
+    resume_text: str,
+    model: str = OLLAMA_MODEL,
+    resume_seniority: str = "",
+) -> dict:
     """
     Generate a job skeleton matching the given resume text.
 
@@ -158,6 +168,9 @@ def generate_job_skeleton(resume_text: str, model: str = OLLAMA_MODEL) -> dict:
     Args:
         resume_text: Full text of the candidate's resume.
         model: Ollama model name (default: OLLAMA_MODEL from config).
+        resume_seniority: The candidate's seniority level (e.g., "Senior", "Mid").
+                         If provided, seniority is deterministically set to this value,
+                         ignoring any LLM output. Default: "" (no override).
 
     Returns:
         JobSkeleton dict with keys: title, seniority, years_required,
@@ -168,10 +181,15 @@ def generate_job_skeleton(resume_text: str, model: str = OLLAMA_MODEL) -> dict:
         ollama.RequestError: If Ollama is not reachable.
         ollama.ResponseError: If the model returns an error response.
     """
-    prompt = _build_skeleton_prompt(resume_text)
+    prompt = _build_skeleton_prompt(resume_text, resume_seniority)
     raw_response = _call_ollama(prompt, model)
     logger.debug("Raw skeleton response: %s", raw_response)
     skeleton = parse_skeleton_response(raw_response)
+
+    # Deterministically override seniority if provided
+    if resume_seniority:
+        skeleton["seniority"] = resume_seniority
+
     logger.info(
         "Generated skeleton — title: %s, seniority: %s, domain: %s",
         skeleton["title"],

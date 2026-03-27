@@ -82,7 +82,7 @@ def run_pipeline(
 
         # Step 1: Generate
         try:
-            job = generate_job_skeleton(resume_text, model)
+            job = generate_job_skeleton(resume_text, model, resume_seniority=resume_info["seniority"])
         except ValueError as e:
             print(f"[pipeline] Generation parse error: {e}")
             continue

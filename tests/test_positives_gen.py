@@ -139,14 +139,21 @@ class TestBuildSkeletonPrompt:
     def test_includes_resume_text(self) -> None:
         """Test that prompt includes the resume text."""
         resume = "Alice Smith, 8 years Python backend engineer"
-        prompt = _build_skeleton_prompt(resume)
+        prompt = _build_skeleton_prompt(resume, "Senior")
 
         assert resume in prompt
+
+    def test_includes_resume_seniority(self) -> None:
+        """Test that prompt includes the resume seniority level."""
+        resume = "test resume"
+        prompt = _build_skeleton_prompt(resume, "Senior")
+
+        assert "Senior" in prompt
 
     def test_includes_expected_field_names(self) -> None:
         """Test that prompt includes all expected field names."""
         resume = "test resume"
-        prompt = _build_skeleton_prompt(resume)
+        prompt = _build_skeleton_prompt(resume, "Mid")
 
         assert "Title:" in prompt
         assert "Seniority:" in prompt
@@ -159,7 +166,7 @@ class TestBuildSkeletonPrompt:
     def test_includes_instruction_to_output_only_fields(self) -> None:
         """Test that prompt instructs to output only the fields."""
         resume = "test resume"
-        prompt = _build_skeleton_prompt(resume)
+        prompt = _build_skeleton_prompt(resume, "Junior")
 
         assert "ONLY" in prompt or "only" in prompt
 
@@ -178,7 +185,7 @@ PrimarySkills: Python, PostgreSQL
 SecondarySkills: Docker, Kubernetes
 Responsibilities: Design scalable APIs; Review code; Optimize databases"""
 
-        result = generate_job_skeleton("test resume")
+        result = generate_job_skeleton("test resume", resume_seniority="Senior")
 
         assert isinstance(result, dict)
         assert result["title"] == "Senior Backend Engineer"
@@ -194,7 +201,7 @@ Responsibilities: Design scalable APIs; Review code; Optimize databases"""
         mock_ollama.return_value = "garbage response with no colons"
 
         with pytest.raises(ValueError, match="No recognizable fields"):
-            generate_job_skeleton("test resume")
+            generate_job_skeleton("test resume", resume_seniority="Mid")
 
     @patch("eval.positive_gen.positives_gen._call_ollama")
     def test_accepts_custom_model(self, mock_ollama: MagicMock) -> None:
@@ -207,8 +214,27 @@ PrimarySkills: JavaScript, React
 SecondarySkills: CSS
 Responsibilities: Build UI components; Write tests; Collaborate with backend team"""
 
-        generate_job_skeleton("test resume", model="custom-model")
+        generate_job_skeleton("test resume", model="custom-model", resume_seniority="Mid")
 
         # Verify model was passed to _call_ollama
         call_args = mock_ollama.call_args
         assert call_args[0][1] == "custom-model"
+
+    @patch("eval.positive_gen.positives_gen._call_ollama")
+    def test_seniority_is_overridden_from_resume(self, mock_ollama: MagicMock) -> None:
+        """Test that seniority is deterministically set to resume_seniority, even if LLM returns wrong value."""
+        # LLM returns wrong seniority (Junior), but we expect Senior from resume_seniority param
+        mock_ollama.return_value = """Title: Senior Backend Engineer
+Seniority: Junior
+YearsRequired: 5-7
+Domain: backend
+PrimarySkills: Python, PostgreSQL
+SecondarySkills: Docker, Kubernetes
+Responsibilities: Design scalable APIs; Review code; Optimize databases"""
+
+        result = generate_job_skeleton("test resume", resume_seniority="Senior")
+
+        # Despite LLM output being "Junior", result should be "Senior" from param
+        assert result["seniority"] == "Senior"
+        assert result["title"] == "Senior Backend Engineer"
+        assert result["domain"] == "backend"
