@@ -69,9 +69,9 @@ class TestGetFieldsForCheck:
         fields = _get_fields_for_check("seniority_years")
         assert set(fields) == {"seniority", "years_required"}
 
-    def test_resume_job_alignment_returns_skills_seniority_and_responsibilities(self) -> None:
+    def test_resume_job_alignment_returns_skills_seniority_years_and_responsibilities(self) -> None:
         fields = _get_fields_for_check("resume_job_alignment")
-        assert set(fields) == {"primary_skills", "seniority", "responsibilities"}
+        assert set(fields) == {"primary_skills", "seniority", "years_required", "responsibilities"}
 
     def test_domain_consistency_returns_only_domain(self) -> None:
         fields = _get_fields_for_check("domain_consistency")

@@ -47,7 +47,11 @@ def _build_skeleton_prompt(resume_text: str) -> str:
     """Build prompt for generating a job skeleton from a resume."""
     return f"""Resume: {resume_text}
 
-Generate 1 job description skeleton matching this resume. Output ONLY these fields, one per line:
+Generate 1 job description skeleton matching this resume. The job MUST:
+- Have seniority exactly matching the resume's level
+- Require no more years of experience than the candidate has
+
+Output ONLY these fields, one per line:
 
 Title: [Senior/Mid/Junior] [Role] Engineer
 Seniority: [Senior/Mid/Junior/Staff]

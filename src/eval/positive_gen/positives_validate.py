@@ -248,8 +248,8 @@ Generated Job:
 
 Check resume-job alignment. Verify:
 1. At least 2 of the resume's skills appear in the job's skills
-2. Job seniority is within ±1 level of resume seniority
-3. Job years required ≤ resume experience + 2 (allow 2-year stretch)
+2. Job seniority must exactly match resume seniority
+3. Job years required ≤ resume experience (no stretch allowed)
 4. Each job responsibility aligns with at least one area of work described in the resume
 5. Overall, is this a plausible match for this candidate?
 
@@ -257,7 +257,7 @@ Respond ONLY with:
 - PASS if all checks succeed
 - FAIL: [specific issue] (e.g., "FAIL: Only 1 skill matches; need 2. Domain also shifted from backend to data.")
 
-Be strict but fair. Minor skill gaps or 1-level seniority difference are acceptable if the job is otherwise well-matched."""
+Be strict. Seniority must match exactly and years must not exceed resume experience."""
 
 
 def _build_domain_consistency_prompt(
@@ -397,8 +397,8 @@ def validate_resume_job_alignment(
     """
     Run Rule Set 3: resume-to-job alignment check.
 
-    Verifies skill overlap (≥ 2 shared skills), seniority compatibility
-    (within ±1 level), and experience ceiling (job years ≤ resume years + 2).
+    Verifies skill overlap (≥ 2 shared skills), seniority match (exact),
+    and experience ceiling (job years ≤ resume years, no stretch).
 
     Args:
         job: JobSkeleton dict from Step 1.
@@ -413,6 +413,19 @@ def validate_resume_job_alignment(
         ollama.RequestError: If Ollama is not reachable.
         ollama.ResponseError: If the model returns an error response.
     """
+    # Guard 1: Exact seniority match (deterministic, no LLM)
+    if job["seniority"] != resume_info["seniority"]:
+        reason = f"Seniority mismatch: job is {job['seniority']!r}, resume is {resume_info['seniority']!r}"
+        logger.warning("resume_job_alignment: FAIL — %s", reason)
+        return {"passed": False, "reason": reason}
+
+    # Guard 2: Years ceiling (no stretch) — deterministic, no LLM
+    min_years = _parse_years_min(job["years_required"])
+    if min_years > resume_info["years_experience"]:
+        reason = f"Years required ({job['years_required']}) exceeds resume experience ({resume_info['years_experience']})"
+        logger.warning("resume_job_alignment: FAIL — %s", reason)
+        return {"passed": False, "reason": reason}
+
     prompt = _build_resume_job_alignment_prompt(
         resume_info["seniority"],
         resume_info["years_experience"],

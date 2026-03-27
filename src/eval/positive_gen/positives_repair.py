@@ -56,7 +56,7 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
             "responsibilities",
         ],
         "seniority_years": ["seniority", "years_required"],
-        "resume_job_alignment": ["primary_skills", "seniority", "responsibilities"],
+        "resume_job_alignment": ["primary_skills", "seniority", "years_required", "responsibilities"],
         "domain_consistency": ["domain"],
     }
     return field_map.get(failed_check, [])
@@ -111,11 +111,13 @@ def _build_repair_prompt(
         )
     elif failed_check == "resume_job_alignment":
         fix_instruction = (
-            "Fix skills, seniority, and responsibilities so the job aligns with the resume:\n"
+            "Fix skills, seniority, years, and responsibilities so the job aligns with the resume:\n"
             "- At least 2 of the resume's primary skills must appear in PrimarySkills\n"
-            "- Job seniority must be within ±1 level of resume seniority\n"
+            "- Job seniority must exactly match resume seniority\n"
+            f"- Job years required must be ≤ {resume_info['years_experience']} (resume experience)\n"
             "- Each responsibility must align with at least one area of work in the resume\n"
             f"Resume seniority: {resume_info['seniority']}\n"
+            f"Resume years experience: {resume_info['years_experience']}\n"
             f"Resume primary skills: {', '.join(resume_info['primary_skills'])}"
         )
     elif failed_check == "domain_consistency":
