@@ -17,6 +17,15 @@ from eval import eval_config, metrics, types
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_metric_name(name: str) -> str:
+    """
+    Sanitize a string for use in MLflow metric names.
+
+    Replaces spaces and slashes with underscores to avoid file path issues.
+    """
+    return name.replace(" ", "_").replace("/", "_")
+
+
 def write_results_json(
     results: list[types.ResumeEvalResult],
     batch_metrics: metrics.BatchMetricsAtK,
@@ -147,9 +156,9 @@ def write_results_json(
 
         # Per-domain and per-seniority miss rates (flat metrics)
         for domain, rate in miss_rate_by_domain.items():
-            mlflow.log_metric(f"miss_rate_domain_{domain}", rate)
+            mlflow.log_metric(f"miss_rate_domain_{_sanitize_metric_name(domain)}", rate)
         for seniority, rate in miss_rate_by_seniority.items():
-            mlflow.log_metric(f"miss_rate_seniority_{seniority}", rate)
+            mlflow.log_metric(f"miss_rate_seniority_{_sanitize_metric_name(seniority)}", rate)
 
         # Distributional summary of per-resume metrics
         precisions = [r["precision_at_5"] for r in results]
