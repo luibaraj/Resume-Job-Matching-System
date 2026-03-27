@@ -8,8 +8,10 @@ import json
 import logging
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
+import mlflow
 from eval import eval_config, metrics, types
 
 logger = logging.getLogger(__name__)
@@ -125,6 +127,55 @@ def write_results_json(
 
     logger.info(f"Wrote results to {eval_config.TUNE_RESULTS_JSON}")
 
+    # MLflow logging
+    if mlflow.active_run():
+        # Artifacts
+        mlflow.log_artifact(str(eval_config.TUNE_RESULTS_JSON), artifact_path="results")
+
+        # Aggregate metrics
+        mlflow.log_metrics({
+            f"mean_precision_at_{eval_config.K_PRECISION}": batch_metrics["mean_precision"][eval_config.K_PRECISION],
+            f"mean_recall_at_{eval_config.K_RECALL}": batch_metrics["mean_recall"][eval_config.K_RECALL],
+            "num_queries": float(batch_metrics["num_queries"]),
+            "total_positives":     float(total_positives),
+            "total_hits":          float(hits),
+            "embedding_misses":    float(embedding_misses),
+            "reranker_misses":     float(reranker_misses),
+            "embedding_miss_rate": embedding_misses / total_positives if total_positives else 0.0,
+            "reranker_miss_rate":  reranker_misses / total_positives if total_positives else 0.0,
+        })
+
+        # Per-domain and per-seniority miss rates (flat metrics)
+        for domain, rate in miss_rate_by_domain.items():
+            mlflow.log_metric(f"miss_rate_domain_{domain}", rate)
+        for seniority, rate in miss_rate_by_seniority.items():
+            mlflow.log_metric(f"miss_rate_seniority_{seniority}", rate)
+
+        # Distributional summary of per-resume metrics
+        precisions = [r["precision_at_5"] for r in results]
+        recalls    = [r["recall_at_10"]   for r in results]
+        mlflow.log_metrics({
+            "min_precision":         float(min(precisions)),
+            "max_precision":         float(max(precisions)),
+            "std_precision":         float(np.std(precisions)),
+            "min_recall":            float(min(recalls)),
+            "max_recall":            float(max(recalls)),
+            "std_recall":            float(np.std(recalls)),
+            "pct_perfect_precision": sum(p == 1.0 for p in precisions) / len(precisions),
+        })
+
+        # Per-resume table (browsable in MLflow UI Artifacts tab)
+        cols = ["resume_id", "seniority", "domain",
+                f"precision_at_{eval_config.K_PRECISION}",
+                f"recall_at_{eval_config.K_RECALL}", "num_positives"]
+        rows = [
+            [r["resume_id"], r["seniority"], r["domain"],
+             r["precision_at_5"], r["recall_at_10"], r["num_positives"]]
+            for r in results
+        ]
+        mlflow.log_table(data={"columns": cols, "data": rows},
+                         artifact_file="results/per_resume_metrics.json")
+
 
 def write_missed_positives_csv(
     results: list[types.ResumeEvalResult], positives_df: pd.DataFrame
@@ -174,3 +225,8 @@ def write_missed_positives_csv(
     missed_df = pd.DataFrame(rows)
     missed_df.to_csv(eval_config.TUNE_MISSED_CSV, index=False)
     logger.info(f"Wrote {len(missed_df)} missed positives to {eval_config.TUNE_MISSED_CSV}")
+
+    # MLflow logging
+    if mlflow.active_run():
+        mlflow.log_artifact(str(eval_config.TUNE_MISSED_CSV), artifact_path="results")
+        mlflow.log_metric("num_missed_positives", float(len(missed_df)))

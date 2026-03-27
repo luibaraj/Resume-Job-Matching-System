@@ -23,18 +23,25 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import numpy as np
+import chromadb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 import pandas as pd
 from dotenv import load_dotenv
 
+import mlflow
 from config import (
     DB_DEFAULT_PATH,
     HNSW_EF,
+    HNSW_EF_CONSTRUCTION,
     RETRIEVE_TOP_K,
     RERANK_TOP_N,
+    RERANK_INTER_REQUEST_DELAY,
     VOYAGE_MODEL,
+    EMBEDDING_DIM,
+    COHERE_RERANK_MODEL,
 )
 from embedding import create_client
 from eval.collection import get_or_build_tune_collection, swap_positives
@@ -45,12 +52,16 @@ from eval.eval_config import (
     RESULTS_DIR,
     TUNE_POSITIVES_PATH,
     TUNE_RESUMES_PATH,
+    TUNE_SAMPLE_N,
+    SAMPLE_SEED,
+    MLFLOW_EXPERIMENT_NAME,
+    MLFLOW_TRACKING_URI,
 )
 from eval.data_loading import sample_jobs
 from eval.metrics import batch_compute_metrics_at_k, compute_metrics_at_k
 from eval.reporting import write_missed_positives_csv, write_results_json
 from eval.types import PositiveRetrievalStatus, ResumeEvalResult
-from reranking import rerank_jobs
+from reranking import batch_rerank_jobs, create_rerank_client
 from retrieval import JobResult, query_collection
 
 logger = logging.getLogger(__name__)
@@ -99,6 +110,50 @@ def load_env() -> tuple[str, Optional[str]]:
         logger.warning("COHERE_API_KEY not set; reranking will be skipped")
 
     return voyage_key, cohere_key
+
+
+def retrieve_for_resume(
+    resume_row: pd.Series,
+    resume_positives_df: pd.DataFrame,
+    resume_embeddings: dict[int, np.ndarray],
+    positive_embeddings: dict[str, np.ndarray],
+    collection: chromadb.Collection,
+) -> Optional[tuple[list[JobResult], set[str]]]:
+    """
+    Swap positives and run dense retrieval for a single resume.
+
+    Returns:
+        (retrieved_jobs, positive_chroma_ids) or None if retrieval fails.
+    """
+    resume_id = int(resume_row["id"])
+    logger.info(
+        f"Retrieving for resume {resume_id} ({resume_row['seniority']}/{resume_row['domain']})"
+    )
+
+    try:
+        # Swap positives
+        resume_positives = resume_positives_df[
+            resume_positives_df["resume_id"] == resume_id
+        ]
+        if len(resume_positives) == 0:
+            logger.warning(f"No positives for resume {resume_id}")
+            return None
+
+        current_positive_ids = swap_positives(
+            collection, [], resume_positives, positive_embeddings
+        )
+
+        # Get query embedding
+        query_emb = resume_embeddings[resume_id]
+
+        # Dense retrieval
+        retrieved = query_collection(collection, query_emb, top_k=RETRIEVE_TOP_K, ef=HNSW_EF)
+
+        return (retrieved, set(current_positive_ids))
+
+    except Exception as e:
+        logger.error(f"Error retrieving for resume {resume_id}: {e}", exc_info=True)
+        return None
 
 
 def classify_positive_retrieval(
@@ -162,73 +217,47 @@ def classify_reranker_outcome(
     return statuses
 
 
-def evaluate_resume(
+def score_resume(
     resume_row: pd.Series,
     resume_positives_df: pd.DataFrame,
-    resume_embeddings: dict[int, np.ndarray],
-    positive_embeddings: dict[str, np.ndarray],
     positives_df: pd.DataFrame,
-    collection: chromadb.Collection,
-    voyage_client,
-    cohere_api_key: Optional[str],
+    retrieved: list[JobResult],
+    positive_chroma_ids: set[str],
+    reranked: list[JobResult],
     skip_rerank: bool,
 ) -> Optional[ResumeEvalResult]:
     """
-    Evaluate a single resume against the collection.
+    Score a resume's retrieval and compute metrics.
 
-    Returns ResumeEvalResult or None if evaluation fails.
+    Classifies hits, computes precision@k and recall@k metrics.
+
+    Returns:
+        ResumeEvalResult or None if scoring fails.
     """
     resume_id = int(resume_row["id"])
-    logger.info(
-        f"Evaluating resume {resume_id} ({resume_row['seniority']}/{resume_row['domain']})"
-    )
 
     try:
-        # Swap positives
-        resume_positives = resume_positives_df[
-            resume_positives_df["resume_id"] == resume_id
-        ]
-        if len(resume_positives) == 0:
-            logger.warning(f"No positives for resume {resume_id}")
-            return None
-
-        current_positive_ids = swap_positives(
-            collection, [], resume_positives, positive_embeddings
-        )
-
-        # Get query embedding
-        query_emb = resume_embeddings[resume_id]
-
-        # Dense retrieval
-        retrieved = query_collection(collection, query_emb, top_k=RETRIEVE_TOP_K, ef=HNSW_EF)
-
         # Classify embedding hits
-        positive_chroma_ids = set(current_positive_ids)
         statuses = classify_positive_retrieval(retrieved, positive_chroma_ids)
-
-        # Reranking (optional)
-        reranked = retrieved
-        if not skip_rerank and cohere_api_key:
-            reranked = rerank_jobs(
-                query=resume_row["resume"],
-                jobs=retrieved,
-                top_n=RERANK_TOP_N,
-                api_key=cohere_api_key,
-            )
 
         # Classify reranker outcome
         statuses = classify_reranker_outcome(statuses, reranked, skip_rerank)
 
-        # Build final ranked list (from reranked or retrieved)
+        # Build final ranked list (from reranked)
         final_ranked = [job["id"] for job in reranked]
 
         # Compute metrics
-        relevant_ids = set(current_positive_ids)
+        relevant_ids = positive_chroma_ids
         metrics = compute_metrics_at_k(
             retrieved_ids=final_ranked,
             relevant_ids=relevant_ids,
             k_values=[K_PRECISION, K_RECALL],
         )
+
+        # Get resume's positives for this evaluation
+        resume_positives = resume_positives_df[
+            resume_positives_df["resume_id"] == resume_id
+        ]
 
         # Build PositiveRetrievalStatus records
         positive_statuses = []
@@ -274,8 +303,10 @@ def evaluate_resume(
         )
 
     except Exception as e:
-        logger.error(f"Error evaluating resume {resume_id}: {e}", exc_info=True)
+        logger.error(f"Error scoring resume {resume_id}: {e}", exc_info=True)
         return None
+
+
 
 
 def main() -> None:
@@ -293,89 +324,156 @@ def main() -> None:
     if not cohere_api_key and not args.skip_rerank:
         logger.warning("Cohere API key missing; reranking disabled")
 
-    # Create results directory
-    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    # MLflow setup
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+    run_name = f"tune_ef{HNSW_EF}_topk{RETRIEVE_TOP_K}_rerank{RERANK_TOP_N}"
 
-    voyage_client = create_client(voyage_api_key)
+    with mlflow.start_run(run_name=run_name):
+        mlflow.set_tags({
+            "eval_set":    "tune",
+            "skip_rerank": str(skip_rerank),
+            "db_path":     args.db_path,
+        })
+        mlflow.log_params({
+            "voyage_model":          VOYAGE_MODEL,
+            "embedding_dim":         EMBEDDING_DIM,
+            "retrieve_top_k":        RETRIEVE_TOP_K,
+            "hnsw_ef":               HNSW_EF,
+            "hnsw_ef_construction":  HNSW_EF_CONSTRUCTION,
+            "rerank_model":          COHERE_RERANK_MODEL,
+            "rerank_top_n":          RERANK_TOP_N,
+            "skip_rerank":           skip_rerank,
+            "k_precision":           K_PRECISION,
+            "k_recall":              K_RECALL,
+            "tune_sample_n":         TUNE_SAMPLE_N,
+            "sample_seed":           SAMPLE_SEED,
+        })
 
-    try:
-        # Load tune data
-        logger.info("Loading tune data")
-        resumes_df = pd.read_csv(TUNE_RESUMES_PATH)
-        positives_df = pd.read_csv(TUNE_POSITIVES_PATH)
-        logger.info(f"Loaded {len(resumes_df)} resumes and {len(positives_df)} positives")
+        # Create results directory
+        Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
-        # Sample jobs
-        tune_jobs_df, _ = sample_jobs(
-            args.db_path, force=args.force_resample
-        )
+        voyage_client = create_client(voyage_api_key)
 
-        # Embed positives and resumes
-        positive_embeddings = embed_positives(
-            voyage_client, positives_df
-        )
-        resume_embeddings = embed_resumes(
-            voyage_client, resumes_df
-        )
+        try:
+            # Load tune data
+            logger.info("Loading tune data")
+            resumes_df = pd.read_csv(TUNE_RESUMES_PATH)
+            positives_df = pd.read_csv(TUNE_POSITIVES_PATH)
+            logger.info(f"Loaded {len(resumes_df)} resumes and {len(positives_df)} positives")
 
-        # Build collection
-        collection = get_or_build_tune_collection(
-            tune_jobs_df, args.db_path, force_rebuild=args.force_resample
-        )
-
-        # Evaluation loop
-        logger.info("Starting per-resume evaluation loop")
-        all_results: list[ResumeEvalResult] = []
-
-        for _, resume_row in resumes_df.iterrows():
-            result = evaluate_resume(
-                resume_row,
-                positives_df,
-                resume_embeddings,
-                positive_embeddings,
-                positives_df,
-                collection,
-                voyage_client,
-                cohere_api_key,
-                skip_rerank,
+            # Sample jobs
+            tune_jobs_df, _ = sample_jobs(
+                args.db_path, force=args.force_resample
             )
 
-            if result:
-                all_results.append(result)
+            # Embed positives and resumes
+            positive_embeddings = embed_positives(
+                voyage_client, positives_df
+            )
+            resume_embeddings = embed_resumes(
+                voyage_client, resumes_df
+            )
 
-        logger.info(f"Successfully evaluated {len(all_results)}/{len(resumes_df)} resumes")
+            # Build collection
+            collection = get_or_build_tune_collection(
+                tune_jobs_df, args.db_path, force_rebuild=args.force_resample
+            )
 
-        # Compute aggregate metrics
-        logger.info("Computing aggregate metrics")
-        batch_retrieved_clean = []
-        batch_relevant = []
+            # Phase 1: Retrieval loop
+            logger.info("Phase 1: Starting retrieval for all resumes")
+            retrieval_results: list[tuple[pd.Series, Optional[tuple[list[JobResult], set[str]]]]] = []
 
-        for result in all_results:
-            ranked = [p["positive_id"] for p in result["positives"] if p["miss_type"] == "hit"]
-            batch_retrieved_clean.append([f"pos_{pid}" for pid in ranked])
-            batch_relevant.append({f"pos_{p['positive_id']}" for p in result["positives"]})
+            for _, resume_row in resumes_df.iterrows():
+                result = retrieve_for_resume(
+                    resume_row,
+                    positives_df,
+                    resume_embeddings,
+                    positive_embeddings,
+                    collection,
+                )
+                retrieval_results.append((resume_row, result))
 
-        batch_metrics = batch_compute_metrics_at_k(
-            batch_retrieved_clean,
-            batch_relevant,
-            k_values=[K_PRECISION, K_RECALL],
-        )
+            # Phase 2: Batch reranking
+            all_reranked: dict[int, list[JobResult]] = {}
+            if not skip_rerank and cohere_api_key:
+                logger.info("Phase 2: Starting batch reranking")
+                cohere_client = create_rerank_client(cohere_api_key)
+                valid = [(row, ret) for row, ret in retrieval_results if ret is not None]
+                queries_and_jobs = [(row["resume"], ret[0]) for row, ret in valid]
+                logger.info(
+                    "Batch reranking %d resumes (inter-request delay: %.1fs)",
+                    len(queries_and_jobs),
+                    RERANK_INTER_REQUEST_DELAY,
+                )
+                reranked_lists = batch_rerank_jobs(
+                    queries_and_jobs,
+                    client=cohere_client,
+                    inter_request_delay=RERANK_INTER_REQUEST_DELAY,
+                )
+                for (row, _), reranked in zip(valid, reranked_lists):
+                    all_reranked[int(row["id"])] = reranked
+            else:
+                logger.info("Phase 2: Skipping reranking")
 
-        # Write results
-        write_results_json(all_results, batch_metrics, skip_rerank)
-        write_missed_positives_csv(all_results, positives_df)
+            # Phase 3: Scoring loop
+            logger.info("Phase 3: Starting scoring and metric computation")
+            all_results: list[ResumeEvalResult] = []
 
-        logger.info("=" * 80)
-        logger.info(f"Mean Precision@{K_PRECISION}: {batch_metrics['mean_precision'][K_PRECISION]:.3f}")
-        logger.info(f"Mean Recall@{K_RECALL}: {batch_metrics['mean_recall'][K_RECALL]:.3f}")
-        logger.info("=" * 80)
+            for resume_row, retrieval_result in retrieval_results:
+                if retrieval_result is None:
+                    continue
 
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+                retrieved, positive_chroma_ids = retrieval_result
+                resume_id = int(resume_row["id"])
+                reranked = all_reranked.get(resume_id, retrieved)
+
+                result = score_resume(
+                    resume_row,
+                    positives_df,
+                    positives_df,
+                    retrieved,
+                    positive_chroma_ids,
+                    reranked,
+                    skip_rerank,
+                )
+
+                if result:
+                    all_results.append(result)
+
+            logger.info(f"Successfully evaluated {len(all_results)}/{len(resumes_df)} resumes")
+
+            # Compute aggregate metrics
+            logger.info("Computing aggregate metrics")
+            batch_retrieved_clean = []
+            batch_relevant = []
+
+            for result in all_results:
+                ranked = [p["positive_id"] for p in result["positives"] if p["miss_type"] == "hit"]
+                batch_retrieved_clean.append([f"pos_{pid}" for pid in ranked])
+                batch_relevant.append({f"pos_{p['positive_id']}" for p in result["positives"]})
+
+            batch_metrics = batch_compute_metrics_at_k(
+                batch_retrieved_clean,
+                batch_relevant,
+                k_values=[K_PRECISION, K_RECALL],
+            )
+
+            # Write results
+            write_results_json(all_results, batch_metrics, skip_rerank)
+            write_missed_positives_csv(all_results, positives_df)
+
+            logger.info("=" * 80)
+            logger.info(f"Mean Precision@{K_PRECISION}: {batch_metrics['mean_precision'][K_PRECISION]:.3f}")
+            logger.info(f"Mean Recall@{K_RECALL}: {batch_metrics['mean_recall'][K_RECALL]:.3f}")
+            logger.info("=" * 80)
+
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Fatal error: {e}", exc_info=True)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

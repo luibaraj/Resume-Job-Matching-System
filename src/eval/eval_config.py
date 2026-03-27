@@ -33,3 +33,7 @@ TUNE_POSITIVE_EMBEDDINGS_HASH: str = "data/eval/tune/positive_embeddings.hash"
 TUNE_RESUME_EMBEDDINGS_CACHE: str = "data/eval/tune/resume_embeddings.npz"
 TUNE_RESUME_EMBEDDINGS_HASH: str = "data/eval/tune/resume_embeddings.hash"
 TUNE_SAMPLED_JOBS_HASH: str = "data/eval/tune/sampled_jobs.hash"
+
+# MLflow Tracking
+MLFLOW_TRACKING_URI: str = "data/eval/mlflow"
+MLFLOW_EXPERIMENT_NAME: str = "resume-job-matching-rag"

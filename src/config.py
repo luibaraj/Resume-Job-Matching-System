@@ -28,6 +28,9 @@ HNSW_EF: int = 400                # HNSW query recall
 # Reranking
 COHERE_RERANK_MODEL: str = "rerank-english-v3.0"
 RERANK_TOP_N: int = 10
+RERANK_MAX_RETRIES: int = 3
+RERANK_RETRY_BASE_DELAY: float = 2.0
+RERANK_INTER_REQUEST_DELAY: float = 7
 
 # Metadata extraction
 DEGREE_UNKNOWN: int = 0
