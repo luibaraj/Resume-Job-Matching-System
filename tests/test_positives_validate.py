@@ -42,7 +42,11 @@ def sample_job() -> JobSkeleton:
         "domain": "backend",
         "primary_skills": ["Python", "PostgreSQL"],
         "secondary_skills": ["Docker", "Redis"],
-        "responsibilities": ["Design scalable APIs", "Lead database optimization", "Mentor junior engineers"],
+        "responsibilities": [
+            "Design and architect scalable REST APIs for millions of users worldwide",
+            "Lead database optimization initiatives and performance tuning across all systems",
+            "Mentor junior engineers and conduct comprehensive code reviews for quality assurance"
+        ],
     }
 
 
