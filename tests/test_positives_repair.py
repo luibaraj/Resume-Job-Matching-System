@@ -299,3 +299,32 @@ class TestRepairJobSkeleton:
         assert result["success"] is False
         # Discard reason reflects the final failure (resume_job_alignment)
         assert "seniority mismatch" in result["discard_reason"]
+
+    @patch("eval.positive_gen.positives_repair.call_ollama_repair")
+    @patch("eval.positive_gen.positives_repair.validate_job_skeleton")
+    def test_responsibilities_fix_instruction_mentions_distinct(
+        self,
+        mock_validate: MagicMock,
+        mock_ollama: MagicMock,
+        sample_job: JobSkeleton,
+        sample_resume_info: ResumeInfo,
+    ) -> None:
+        """Test that responsibilities fix instruction includes non-repetition language."""
+        # Capture the prompt passed to call_ollama_repair
+        mock_ollama.return_value = "Responsibilities: Built distributed systems; Optimized databases; Mentored engineers"
+
+        mock_validate.return_value = {"passed": True, "failed_check": None, "reason": None}
+
+        repair_job_skeleton(
+            sample_job,
+            "responsibilities",
+            "responsibilities too short",
+            sample_resume_info,
+        )
+
+        # Get the prompt that was passed to call_ollama_repair
+        assert mock_ollama.call_count > 0
+        prompt = mock_ollama.call_args[0][0]
+
+        # Verify that the prompt contains language about distinct or non-repetitive
+        assert "distinct" in prompt.lower() or "not repeat" in prompt.lower()

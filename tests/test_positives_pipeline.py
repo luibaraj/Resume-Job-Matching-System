@@ -27,13 +27,14 @@ def resume_text() -> str:
 
 
 @pytest.fixture
-def resume_info() -> ResumeInfo:
+def resume_info(resume_text: str) -> ResumeInfo:
     """Sample resume information."""
     return {
         "seniority": "Senior",
         "years_experience": 8,
         "primary_skills": ["Python", "Go", "PostgreSQL"],
         "domain": "backend",
+        "resume_text": resume_text,
     }
 
 
@@ -91,6 +92,33 @@ class TestRunPipeline:
 
         assert len(result) == 3
         assert all(job == valid_job for job in result)
+
+    @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
+    @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
+    def test_generate_called_with_resume_info_dict(
+        self,
+        mock_validate: MagicMock,
+        mock_generate: MagicMock,
+        resume_text: str,
+        resume_info: ResumeInfo,
+        valid_job: JobSkeleton,
+    ) -> None:
+        """Test that generate_job_skeleton is called with ResumeInfo dict, not bare string."""
+        mock_generate.return_value = valid_job
+        mock_validate.return_value = {
+            "passed": True,
+            "failed_check": None,
+            "reason": None,
+        }
+
+        run_pipeline(resume_text, resume_info, target_count=1)
+
+        # Verify first positional argument is a dict with seniority key
+        first_arg = mock_generate.call_args[0][0]
+        assert isinstance(first_arg, dict)
+        assert "seniority" in first_arg
+        # Should not be a string
+        assert not isinstance(first_arg, str)
 
     @patch("eval.positive_gen.positives_pipeline.generate_job_skeleton")
     @patch("eval.positive_gen.positives_pipeline.validate_job_skeleton")
