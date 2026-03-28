@@ -47,6 +47,7 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
     that need to be shown to the LLM for repair.
     """
     field_map = {
+        "responsibilities": ["responsibilities"],
         "structural": [
             "seniority",
             "domain",
@@ -90,15 +91,21 @@ def _build_repair_prompt(
     failure_msg = reason or failed_check
 
     # Build fix instructions per failed_check
-    if failed_check == "structural":
+    if failed_check == "responsibilities":
+        fix_instruction = (
+            "Rewrite the Responsibilities field. Requirements:\n"
+            "- Must have 3 to 5 items (semicolon-separated)\n"
+            "- Each item must be a complete sentence of at least 10 words\n"
+            "- Each item must describe a real engineering task matching the resume skills"
+        )
+    elif failed_check == "structural":
         fix_instruction = (
             "Fix any malformed fields:\n"
             "- Seniority must be one of: Junior, Mid, Senior, Staff\n"
             "- Domain must be one of: backend, frontend, fullstack, data\n"
             "- YearsRequired must be a number between 1 and 20 (e.g., '4-6' or '5')\n"
             "- PrimarySkills must have 2 to 4 items\n"
-            "- Title must be a valid job title (non-empty)\n"
-            "- Responsibilities must have 3 to 5 non-empty items (semicolon-separated)"
+            "- Title must be a valid job title (non-empty)"
         )
     elif failed_check == "seniority_years":
         fix_instruction = (

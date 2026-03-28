@@ -56,6 +56,7 @@ def _build_skeleton_prompt(resume_text: str, resume_seniority: str) -> str:
 Generate 1 job description skeleton matching this resume. The job MUST:
 - Use seniority: {resume_seniority}  ← FIXED, do not change
 - Require no more years of experience than the candidate has
+- Each responsibility must be a complete sentence of at least 10 words
 
 Output ONLY these fields, one per line:
 
@@ -65,7 +66,7 @@ YearsRequired: [4-6]
 Domain: [backend/frontend/fullstack/data]
 PrimarySkills: [skill1, skill2, skill3]
 SecondarySkills: [skill4, skill5]
-Responsibilities: [responsibility1; responsibility2; responsibility3]
+Responsibilities: [10+ word responsibility sentence; 10+ word responsibility sentence; 10+ word responsibility sentence]
 
 Do not add explanation, formatting, or extra text."""
 

@@ -117,6 +117,48 @@ def _parse_years_min(years_str: str) -> int:
         return 0
 
 
+def validate_responsibilities(
+    responsibilities: list[str],
+) -> ValidationResult:
+    """
+    Run deterministic responsibilities validation.
+
+    Checks that responsibilities list has 3–5 items, each with ≥10 words,
+    and no empty items or literal periods.
+
+    Args:
+        responsibilities: List of responsibility strings.
+
+    Returns:
+        ValidationResult with passed=True or passed=False and a reason string.
+    """
+    if not responsibilities:
+        msg = "Responsibilities list is empty"
+        logger.warning("responsibilities: FAIL — %s", msg)
+        return {"passed": False, "reason": msg}
+
+    if len(responsibilities) < 3 or len(responsibilities) > 5:
+        msg = f"Must have 3–5 responsibilities, got {len(responsibilities)}"
+        logger.warning("responsibilities: FAIL — %s", msg)
+        return {"passed": False, "reason": msg}
+
+    for i, resp in enumerate(responsibilities):
+        resp_stripped = resp.strip()
+        if not resp_stripped or resp_stripped == ".":
+            msg = f"Responsibility {i} is empty or a literal period"
+            logger.warning("responsibilities: FAIL — %s", msg)
+            return {"passed": False, "reason": msg}
+
+        word_count = len(resp_stripped.split())
+        if word_count < 10:
+            msg = f"Responsibility {i} has {word_count} words, need ≥10: {resp_stripped!r}"
+            logger.warning("responsibilities: FAIL — %s", msg)
+            return {"passed": False, "reason": msg}
+
+    logger.info("responsibilities: PASS — %d items, all ≥10 words", len(responsibilities))
+    return {"passed": True, "reason": None}
+
+
 def _parse_validation_response(raw_response: str) -> ValidationResult:
     """
     Parse an LLM validation response into a ValidationResult.
@@ -168,7 +210,6 @@ Check format compliance. Verify:
 4. Domain is one of: backend, frontend, fullstack, data
 5. PrimarySkills has 2–4 items (comma-separated)
 6. No fields are missing
-7. Responsibilities has 3–5 non-empty items
 
 Respond ONLY with:
 - PASS if all checks succeed
@@ -547,11 +588,11 @@ def validate_job_skeleton(
     model: str = OLLAMA_MODEL,
 ) -> dict[str, bool | str | None]:
     """
-    Run all four validation rule sets in sequence.
+    Run all validation rule sets in sequence.
 
-    Executes structural → seniority_years → resume_job_alignment →
-    domain_consistency. Stops at the first failure and returns which
-    check failed. All four must pass for the skeleton to be accepted.
+    Executes responsibilities (deterministic) → structural → seniority_years →
+    resume_job_alignment → domain_consistency. Stops at the first failure and
+    returns which check failed. All checks must pass for the skeleton to be accepted.
 
     Before validation, normalizes seniority and domain fields to canonical
     enum values (e.g., "Mid-level" → "Mid", "Full-stack" → "fullstack").
@@ -564,10 +605,10 @@ def validate_job_skeleton(
 
     Returns:
         Dict with keys:
-            "passed" (bool): True only if all four checks passed.
+            "passed" (bool): True only if all checks passed.
             "failed_check" (str | None): Name of the first failed check
-                ("structural", "seniority_years", "resume_job_alignment",
-                "domain_consistency"), or None if all passed.
+                ("responsibilities", "structural", "seniority_years",
+                "resume_job_alignment", "domain_consistency"), or None if all passed.
             "reason" (str | None): Failure reason from the failing check,
                 or None if all passed.
 
@@ -577,6 +618,7 @@ def validate_job_skeleton(
     """
     job = _normalize_skeleton(job)
     checks = [
+        ("responsibilities", lambda: validate_responsibilities(job["responsibilities"])),
         ("structural", lambda: validate_structural(job, model)),
         ("seniority_years", lambda: validate_seniority_years(job, model)),
         ("resume_job_alignment", lambda: validate_resume_job_alignment(job, resume_info, model)),
