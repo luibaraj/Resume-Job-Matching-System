@@ -95,7 +95,7 @@ def _build_repair_prompt(
         fix_instruction = (
             "Rewrite the Responsibilities field. Requirements:\n"
             "- Must have 3 to 5 items (semicolon-separated)\n"
-            "- Each item must be a complete sentence of at least 10 words\n"
+            "- Each item must be a distinct, non-repetitive complete sentence of at least 10 words\n"
             "- Each item must describe a real engineering task matching the resume skills"
         )
     elif failed_check == "structural":

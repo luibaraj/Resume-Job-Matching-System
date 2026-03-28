@@ -54,6 +54,13 @@ SKELETON_MAX_TOKENS: int = 200
 VALIDATION_MAX_TOKENS: int = 50
 REPAIR_MAX_TOKENS: int = 200  # Same output format as SKELETON_MAX_TOKENS
 MAX_BATCH_SIZE: int = 2
+
+# Synthetic positives generation (per-field strategy)
+TARGET_RESPONSIBILITY_COUNT: int = 4  # Target within valid 3–5 range
+SKILLS_MAX_TOKENS: int = 80           # Shorter response for skills-only call
+RESPONSIBILITY_MAX_TOKENS: int = 60   # Single responsibility is 1 sentence
+RESUME_EXTRACT_MAX_TOKENS: int = 10   # Years extraction (single integer line)
+
 CORPUS_LIMITATION_MESSAGE: str = (
     "No strongly matching jobs found in current corpus. "
     "This indicates corpus limitations, not poor fit. "
