@@ -38,9 +38,16 @@ def create_rerank_client(api_key: str) -> cohere.ClientV2:
     return cohere.ClientV2(api_key=api_key)
 
 
+_SENIORITY_LABEL: dict[int, str] = {1: "Entry-level", 2: "Mid-level", 3: "Senior", 4: "Staff"}
+
+
 def _format_document(job: JobResult) -> str:
     """Format a JobResult into a single string for Cohere reranking."""
-    return f"{job['title']} | {job['location']}\n{job['cleaned_description']}"
+    seniority_label = _SENIORITY_LABEL.get(job["seniority_level"], "")
+    header = f"{job['title']} | {job['location']}"
+    if seniority_label:
+        header = f"{header} | {seniority_label}"
+    return f"{header}\n{job['cleaned_description']}"
 
 
 def rerank_jobs(

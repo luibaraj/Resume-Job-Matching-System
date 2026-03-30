@@ -18,6 +18,7 @@ def make_job(
     title: str = "Software Engineer",
     location: str = "Remote",
     description: str = "Excellent opportunity",
+    seniority_level: int = 0,
 ) -> JobResult:
     """Helper to create a JobResult dict for testing."""
     return JobResult(
@@ -28,6 +29,7 @@ def make_job(
         source_url="https://example.com/job",
         board_token="example",
         cleaned_description=description,
+        seniority_level=seniority_level,
     )
 
 

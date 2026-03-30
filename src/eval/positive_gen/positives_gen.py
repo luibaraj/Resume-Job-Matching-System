@@ -273,7 +273,13 @@ def _generate_deterministic_fields(
         "data": "Data Engineer",
     }
     role = domain_role.get(domain, "Engineer")
-    title = f"{seniority} {role}"
+    _title_seniority_prefix = {
+        "Junior": "Junior",
+        "Mid": "Mid",
+        "Senior": "Senior",
+        "Staff": "Staff",
+    }
+    title = f"{_title_seniority_prefix.get(seniority, seniority)} {role}"
 
     years_bracket = {
         "Junior": "0-2",

@@ -14,6 +14,7 @@ import pandas as pd
 
 import config
 import embedding
+import regex_extraction
 from eval import data_loading, eval_config
 
 logger = logging.getLogger(__name__)
@@ -110,9 +111,12 @@ def get_or_build_tune_collection(
                 "source_url": row[3] or "",
                 "board_token": row[4] or "",
                 "cleaned_description": row[5] or "",
-                "required_degree": 0,
-                "seniority_level": 0,
-                "min_years_experience": 0,
+                "required_degree": regex_extraction.extract_degree_requirement(row[5] or ""),
+                "seniority_level": (
+                    regex_extraction.extract_seniority_level(row[5] or "")
+                    or regex_extraction.extract_seniority_from_title(row[1] or "")
+                ),
+                "min_years_experience": regex_extraction.extract_years_experience(row[5] or ""),
             }
         )
 
@@ -177,9 +181,12 @@ def swap_positives(
                 "source_url": "",
                 "board_token": "",
                 "cleaned_description": str(row["job_description"]),
-                "required_degree": 0,
-                "seniority_level": 0,
-                "min_years_experience": 0,
+                "required_degree": regex_extraction.extract_degree_requirement(str(row["job_description"])),
+                "seniority_level": (
+                    regex_extraction.extract_seniority_level(str(row["job_description"]))
+                    or regex_extraction.extract_seniority_from_title(str(row["title"]) if row["title"] else "")
+                ),
+                "min_years_experience": regex_extraction.extract_years_experience(str(row["job_description"])),
             }
         )
 
