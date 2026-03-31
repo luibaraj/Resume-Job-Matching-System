@@ -60,3 +60,7 @@ matched_jobs.md
 
 # Claude
 .claude
+
+
+# Collecting jobs
+scripts/__pycache__/collect_jobs.py
