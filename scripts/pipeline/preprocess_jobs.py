@@ -8,7 +8,7 @@ import time
 
 from dotenv import load_dotenv
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from src.config import DB_DEFAULT_PATH
 from src.db_utils import add_column_if_missing

@@ -17,7 +17,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 # Ensure src/ can be imported from any working directory
-src_path = str(Path(__file__).resolve().parent.parent / "src")
+src_path = str(Path(__file__).resolve().parent.parent.parent / "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Add project root to path so we can import from src/
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from src.config import DB_DEFAULT_PATH
 from src.greenhouse_scraper import scrape_greenhouse_board, GreenhouseJob
 
@@ -50,6 +50,7 @@ def init_db(db_path: str) -> None:
                 job_type     TEXT,
                 scraped_at   TEXT,
                 updated_at   TEXT,
+                created_at   TEXT,
                 UNIQUE(external_id, board_token)
             )
         """)
@@ -68,7 +69,7 @@ def scrape_board_safe(token: str) -> tuple[str, list[GreenhouseJob] | Exception]
     logger.info(f"[{token}] Starting scrape...")
     try:
         jobs = scrape_greenhouse_board(token)
-        logger.info(f"[{token}] Done — {len(jobs)} jobs fetched.")
+        logger.info(f"[{token}] Done — {len(jobs)} jobs.")
         return (token, jobs)
     except Exception as e:
         logger.error(f"[{token}] ERROR: {e}")
@@ -125,14 +126,15 @@ def write_jobs_to_db(db_path: str, results: list[tuple]) -> int:
                     d['job_type'],
                     d['scraped_at'],
                     job.updated_at,  # Not in to_dict(), pull directly
+                    job.created_at,  # Not in to_dict(), pull directly
                 ))
 
             if rows:
                 cursor.executemany(
                     """INSERT OR IGNORE INTO jobs
                        (external_id, board_token, title, location, description,
-                        source, source_url, company_name, department, job_type, scraped_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        source, source_url, company_name, department, job_type, scraped_at, updated_at, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     rows,
                 )
                 inserted = cursor.rowcount

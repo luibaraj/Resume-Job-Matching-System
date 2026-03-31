@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.config import DB_DEFAULT_PATH, VOYAGE_BATCH_SIZE
 from src.db_utils import add_column_if_missing

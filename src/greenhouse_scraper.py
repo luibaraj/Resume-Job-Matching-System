@@ -7,7 +7,7 @@ Handles rate limiting, pagination, and data transformation.
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from urllib.parse import urljoin
@@ -47,7 +47,7 @@ class GreenhouseJob:
             'company_name': self.company_name,
             'department': self.department,
             'job_type': self.job_type,
-            'scraped_at': datetime.utcnow().isoformat(),
+            'scraped_at': datetime.now(timezone.utc).isoformat(),
         }
 
 
@@ -165,15 +165,29 @@ class GreenhouseScraper:
             if status is not None and status != status_filter:
                 return None
 
-            # Check updated_at filter
+            # Check 24-hour recency filter (updated_at OR created_at)
             if updated_after:
+                cutoff = updated_after
                 updated_at_str = job_data.get('updated_at', '')
+                created_at_str = job_data.get('created_at', '')
+
+                updated_recently = False
+                created_recently = False
+
                 if updated_at_str:
-                    updated_at = datetime.fromisoformat(
+                    updated_at_dt = datetime.fromisoformat(
                         updated_at_str.replace('Z', '+00:00')
                     )
-                    if updated_at < updated_after:
-                        return None
+                    updated_recently = updated_at_dt >= cutoff
+
+                if created_at_str:
+                    created_at_dt = datetime.fromisoformat(
+                        created_at_str.replace('Z', '+00:00')
+                    )
+                    created_recently = created_at_dt >= cutoff
+
+                if not (updated_recently or created_recently):
+                    return None
 
             # Extract required fields
             job_id = str(job_data.get('id', ''))
@@ -304,7 +318,7 @@ def scrape_greenhouse_board(
 
     updated_after = None
     if updated_after_days:
-        updated_after = datetime.utcnow() - timedelta(days=updated_after_days)
+        updated_after = datetime.now(timezone.utc) - timedelta(days=updated_after_days)
 
     try:
         jobs = scraper.fetch_jobs(status=status, updated_after=updated_after)
