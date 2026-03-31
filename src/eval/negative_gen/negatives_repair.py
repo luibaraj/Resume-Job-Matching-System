@@ -61,7 +61,6 @@ def _get_fields_for_check(failed_check: str) -> list[str]:
             "domain",
             "responsibilities",
         ],
-        "domain_mismatch": ["domain", "title"],
         "responsibility_mismatch": ["responsibilities", "primary_skills", "secondary_skills"],
     }
     return field_map.get(failed_check, [])
@@ -147,16 +146,6 @@ def _build_repair_prompt(
             f"Resume domain: {resume_info['domain']}\n"
             f"Resume primary skills: {', '.join(resume_info['primary_skills'])}\n"
             f"NOTE: Do NOT change seniority — {target_seniority} mismatch is intentional."
-        )
-    elif failed_check == "domain_mismatch":
-        target_domain = mismatch_context.get("target_domain", "")
-        resume_domain = mismatch_context.get("resume_domain", resume_info["domain"])
-        fix_instruction = (
-            f"Fix the domain to be genuinely different from the resume domain.\n"
-            f"- Domain MUST be: {target_domain}\n"
-            f"- Domain must NOT be: {resume_domain} or any adjacent domain\n"
-            f"- Update Title to reflect the {target_domain} domain\n"
-            f"This is intentionally a domain shift — the seniority is correct."
         )
     elif failed_check == "responsibility_mismatch":
         resume_domain = mismatch_context.get("resume_domain", resume_info["domain"])

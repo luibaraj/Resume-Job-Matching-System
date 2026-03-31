@@ -4,16 +4,17 @@ Generate synthetic negative job descriptions for all resumes in synthetic_resume
 
 For each resume, generates intentionally mismatched job descriptions:
 - 1 seniority-mismatched job
-- 1 domain-mismatched job
-- 3 responsibility-mismatched jobs
+- 2 responsibility-mismatched jobs
 
-Each job is validated and repaired if needed. Results are written to a CSV file with:
+Each job is validated and repaired if needed. Deterministic fields (title, seniority, domain,
+years_required) are generated using the same approach as the positives pipeline to ensure
+structural consistency. Results are written to a CSV file with:
   - A unique UUID per job
   - Resume ID reference
   - All JobSkeleton fields
   - Denormalized resume metadata (seniority, domain)
   - An embedding-ready plain-text job_description
-  - The mismatch_type (seniority/domain/responsibility)
+  - The mismatch_type (seniority/responsibility)
   - ISO 8601 generation timestamp
 
 Output: data/eval/synthetic_negative_job_descriptions.csv
@@ -56,7 +57,6 @@ logger = logging.getLogger(__name__)
 
 
 def run_negatives_for_resume(
-    resume_text: str,
     resume_info: ResumeInfo,
     mismatch_type: MismatchType,
     target_count: int,
@@ -69,9 +69,8 @@ def run_negatives_for_resume(
     until target_count is reached or max_attempts is exhausted.
 
     Args:
-        resume_text: Full resume text.
-        resume_info: ResumeInfo dict with seniority, domain, skills, years_experience.
-        mismatch_type: Type of mismatch ("seniority", "domain", "responsibility").
+        resume_info: ResumeInfo dict with resume_text, seniority, domain, skills, years_experience.
+        mismatch_type: Type of mismatch ("seniority", "responsibility").
         target_count: Number of valid skeletons to collect.
         model: Ollama model name.
 
@@ -106,11 +105,9 @@ def run_negatives_for_resume(
         # Step 1: Generate
         try:
             job, mismatch_context = generate_mismatched_skeleton(
-                resume_text=resume_text,
-                resume_seniority=resume_info["seniority"],
+                resume_info=resume_info,
                 model=model,
                 mismatch_type=mismatch_type,
-                resume_domain=resume_info["domain"],
             )
         except ValueError as e:
             logger.warning(
@@ -252,8 +249,7 @@ def main():
         # Define per-resume targets: (mismatch_type, target_count)
         generation_tasks = [
             ("seniority", 1),
-            ("domain", 1),
-            ("responsibility", 3),
+            ("responsibility", 2),
         ]
 
         for mismatch_type, target_count in generation_tasks:
@@ -263,7 +259,6 @@ def main():
             )
             try:
                 jobs = run_negatives_for_resume(
-                    resume_text=resume_text,
                     resume_info=resume_info,
                     mismatch_type=mismatch_type,
                     target_count=target_count,

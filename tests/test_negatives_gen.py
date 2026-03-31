@@ -1,8 +1,7 @@
 """
-Unit tests for the seniority-mismatched negatives generation module.
+Unit tests for the negatives generation module.
 
-Tests the target seniority selection, years range mapping, prompt building,
-and skeleton generation.
+Tests the target seniority selection and skeleton generation with deterministic fields.
 """
 
 import sys
@@ -17,8 +16,6 @@ from eval.negative_gen.negatives_gen import (
     SENIORITY_ORDER,
     generate_mismatched_skeleton,
     get_target_seniority,
-    _years_range_for_seniority,
-    _build_mismatched_skeleton_prompt,
 )
 
 
@@ -69,151 +66,98 @@ class TestGetTargetSeniority:
         mock_choice.assert_called_once()
 
 
-class TestYearsRangeForSeniority:
-    """Tests for _years_range_for_seniority."""
-
-    def test_junior_returns_correct_range(self) -> None:
-        """Junior should return 0-2."""
-        assert _years_range_for_seniority("Junior") == "0-2"
-
-    def test_mid_returns_correct_range(self) -> None:
-        """Mid should return 2-4."""
-        assert _years_range_for_seniority("Mid") == "2-4"
-
-    def test_senior_returns_correct_range(self) -> None:
-        """Senior should return 4-7."""
-        assert _years_range_for_seniority("Senior") == "4-7"
-
-    def test_staff_returns_correct_range(self) -> None:
-        """Staff should return 7-10."""
-        assert _years_range_for_seniority("Staff") == "7-10"
-
-    def test_invalid_seniority_raises_value_error(self) -> None:
-        """Invalid seniority should raise ValueError."""
-        with pytest.raises(ValueError, match="Invalid seniority"):
-            _years_range_for_seniority("Consultant")
-
-
-class TestBuildMismatchedSkeletonPrompt:
-    """Tests for _build_mismatched_skeleton_prompt."""
-
-    def test_includes_target_seniority(self) -> None:
-        """Prompt should include target seniority."""
-        prompt = _build_mismatched_skeleton_prompt(
-            "I have 8 years of backend experience", "Junior", "0-2"
-        )
-        assert "Junior" in prompt
-
-    def test_includes_years_range(self) -> None:
-        """Prompt should include pre-computed years range."""
-        prompt = _build_mismatched_skeleton_prompt(
-            "I have 8 years of backend experience", "Senior", "4-7"
-        )
-        assert "4-7" in prompt
-
-    def test_includes_resume_text(self) -> None:
-        """Prompt should include resume text for context."""
-        resume_text = "Python, Django, PostgreSQL expertise"
-        prompt = _build_mismatched_skeleton_prompt(resume_text, "Staff", "7-10")
-        assert "Python" in prompt
-        assert "Django" in prompt
-
-    def test_emphasizes_seniority_mismatch(self) -> None:
-        """Prompt should emphasize that seniority must be mismatched."""
-        prompt = _build_mismatched_skeleton_prompt(
-            "Resume text", "Senior", "4-7"
-        )
-        assert "MUST be" in prompt or "must be" in prompt
-        assert "Senior" in prompt
-
-
 class TestGenerateMismatchedSkeleton:
     """Tests for generate_mismatched_skeleton."""
 
-    @patch("eval.negative_gen.negatives_gen._call_ollama")
+    @patch("eval.negative_gen.negatives_gen._generate_single_responsibility")
+    @patch("eval.negative_gen.negatives_gen._generate_skills")
+    @patch("eval.negative_gen.negatives_gen._generate_deterministic_fields")
+    @patch("eval.negative_gen.negatives_gen._extract_years_experience")
     @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_returns_tuple_of_skeleton_and_mismatch_context(
-        self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
+    def test_seniority_mismatch_returns_tuple(
+        self,
+        mock_get_target: MagicMock,
+        mock_extract_years: MagicMock,
+        mock_det_fields: MagicMock,
+        mock_skills: MagicMock,
+        mock_resp: MagicMock,
     ) -> None:
-        """Should return tuple of (JobSkeleton dict, mismatch_context dict)."""
+        """Should return tuple of (JobSkeleton dict, mismatch_context dict) for seniority mismatch."""
         mock_get_target.return_value = "Staff"
-        mock_call_ollama.return_value = """Title: Staff Data Engineer
-Seniority: Staff
-YearsRequired: 7-9
-Domain: data
-PrimarySkills: Python, Spark, SQL
-SecondarySkills: Kubernetes
-Responsibilities: Design data pipelines; Lead architecture; Mentor team"""
+        mock_extract_years.return_value = 5
+        mock_det_fields.return_value = {
+            "title": "Staff Backend Engineer",
+            "seniority": "Staff",
+            "domain": "backend",
+            "years_required": "6-10",
+        }
+        mock_skills.return_value = (["Python", "Go"], ["Kubernetes"])
+        # Need to provide enough return values for the loop to generate 5 responsibilities
+        mock_resp.side_effect = [
+            "Design distributed systems",
+            "Lead architecture decisions",
+            "Mentor junior engineers",
+            "Review designs",
+            "Build scalable systems",
+        ]
+
+        resume_info = {
+            "resume_text": "5 years backend experience",
+            "seniority": "Junior",
+            "domain": "backend",
+            "primary_skills": ["Python"],
+        }
 
         skeleton, context = generate_mismatched_skeleton(
-            "Resume text", "Junior"
+            resume_info=resume_info,
+            mismatch_type="seniority"
         )
 
         assert isinstance(skeleton, dict)
-        assert skeleton["title"] == "Staff Data Engineer"
+        assert skeleton["title"] == "Staff Backend Engineer"
         assert skeleton["seniority"] == "Staff"
         assert isinstance(context, dict)
         assert context["target_seniority"] == "Staff"
+        assert len(skeleton["responsibilities"]) > 0
 
-    @patch("eval.negative_gen.negatives_gen._call_ollama")
-    @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_calls_get_target_seniority(
-        self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
+    @patch("eval.negative_gen.negatives_gen.ollama.chat")
+    @patch("eval.negative_gen.negatives_gen._generate_skills")
+    @patch("eval.negative_gen.negatives_gen._generate_deterministic_fields")
+    @patch("eval.negative_gen.negatives_gen._extract_years_experience")
+    def test_responsibility_mismatch_uses_deterministic_fields(
+        self,
+        mock_extract_years: MagicMock,
+        mock_det_fields: MagicMock,
+        mock_skills: MagicMock,
+        mock_chat: MagicMock,
     ) -> None:
-        """Should call get_target_seniority with resume_seniority."""
-        mock_get_target.return_value = "Senior"
-        mock_call_ollama.return_value = """Title: Senior Engineer
-Seniority: Senior
-YearsRequired: 4-6
-Domain: backend
-PrimarySkills: Go, Rust
-SecondarySkills: Kubernetes
-Responsibilities: Build systems; Review code; Unblock team"""
+        """Should use deterministic fields matching resume for responsibility mismatch."""
+        mock_extract_years.return_value = 5
+        mock_det_fields.return_value = {
+            "title": "Mid Backend Engineer",
+            "seniority": "Mid",
+            "domain": "backend",
+            "years_required": "2-5",
+        }
+        mock_skills.return_value = (["Python", "Docker"], ["Kubernetes"])
+        # Mock ollama.chat to always return a valid responsibility (up to 20 calls to be safe)
+        mock_chat.return_value = {"message": {"content": "Deploy and monitor production services"}}
 
-        generate_mismatched_skeleton("Resume text", "Mid")
+        resume_info = {
+            "resume_text": "5 years backend experience",
+            "seniority": "Mid",
+            "domain": "backend",
+            "primary_skills": ["Python", "Docker"],
+        }
 
-        mock_get_target.assert_called_once_with("Mid")
+        skeleton, context = generate_mismatched_skeleton(
+            resume_info=resume_info,
+            mismatch_type="responsibility"
+        )
 
-    @patch("eval.negative_gen.negatives_gen._call_ollama")
-    @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_invalid_resume_seniority_raises_value_error(
-        self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
-    ) -> None:
-        """Invalid resume_seniority should raise ValueError."""
-        mock_get_target.side_effect = ValueError("Invalid")
-
-        with pytest.raises(ValueError):
-            generate_mismatched_skeleton("Resume text", "BadSeniority")
-
-    @patch("eval.negative_gen.negatives_gen._call_ollama")
-    @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_bad_llm_response_raises_value_error(
-        self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
-    ) -> None:
-        """Unparseable LLM response should raise ValueError."""
-        mock_get_target.return_value = "Junior"
-        mock_call_ollama.return_value = "Completely unparseable gibberish"
-
-        with pytest.raises(ValueError, match="No recognizable fields"):
-            generate_mismatched_skeleton("Resume text", "Senior")
-
-    @patch("eval.negative_gen.negatives_gen._call_ollama")
-    @patch("eval.negative_gen.negatives_gen.get_target_seniority")
-    def test_accepts_custom_model(
-        self, mock_get_target: MagicMock, mock_call_ollama: MagicMock
-    ) -> None:
-        """Should accept custom model parameter."""
-        mock_get_target.return_value = "Junior"
-        mock_call_ollama.return_value = """Title: Junior Engineer
-Seniority: Junior
-YearsRequired: 0-2
-Domain: backend
-PrimarySkills: Python, JavaScript
-SecondarySkills: Git
-Responsibilities: Write features; Read docs; Learn from team"""
-
-        generate_mismatched_skeleton("Resume text", "Senior", model="custom_model")
-
-        # Verify _call_ollama was called with the custom model (positional arg at index 1)
-        call_args = mock_call_ollama.call_args
-        assert call_args[0][1] == "custom_model"
+        # Fields should match resume
+        assert skeleton["seniority"] == "Mid"
+        assert skeleton["domain"] == "backend"
+        assert context.get("mismatch_dimension") == "responsibility"
+        # Should have generated 5 responsibilities (TARGET_RESPONSIBILITY_COUNT)
+        assert len(skeleton["responsibilities"]) > 0

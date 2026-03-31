@@ -45,13 +45,6 @@ _MIN_MISMATCH_GAP = {
     "Staff": 2,
 }
 
-# Domain adjacency for domain mismatch validation
-_DOMAIN_ADJACENT: dict[str, set[str]] = {
-    "backend": {"fullstack"},
-    "frontend": {"fullstack"},
-    "fullstack": {"backend", "frontend"},
-    "data": set(),
-}
 
 
 
@@ -202,40 +195,6 @@ def validate_skill_domain_overlap(
     return result
 
 
-def validate_domain_mismatch(
-    job: JobSkeleton,
-    resume_info: ResumeInfo,
-) -> ValidationResult:
-    """
-    Run Rule Set 3 (domain mismatch): verify job domain is genuinely different from resume.
-
-    Passes only when job domain is neither the resume domain nor an adjacent domain.
-    Adjacent pairs: backend↔fullstack, frontend↔fullstack.
-    data has no adjacency — any non-data domain is a valid mismatch.
-
-    Args:
-        job: JobSkeleton dict from the generation step.
-        resume_info: ResumeInfo dict with resume domain.
-
-    Returns:
-        ValidationResult with passed=True or passed=False and a reason string.
-    """
-    job_domain = job["domain"]
-    resume_domain = resume_info["domain"]
-
-    if job_domain == resume_domain:
-        msg = f"Job domain {job_domain!r} matches resume domain — not a domain mismatch"
-        logger.warning("domain_mismatch: FAIL — %s", msg)
-        return {"passed": False, "reason": msg}
-
-    adjacent = _DOMAIN_ADJACENT.get(resume_domain, set())
-    if job_domain in adjacent:
-        msg = f"Job domain {job_domain!r} is adjacent to resume domain {resume_domain!r} — too similar for domain mismatch"
-        logger.warning("domain_mismatch: FAIL — %s", msg)
-        return {"passed": False, "reason": msg}
-
-    logger.info("domain_mismatch: PASS — job domain=%s, resume domain=%s", job_domain, resume_domain)
-    return {"passed": True, "reason": None}
 
 
 def _build_responsibility_mismatch_prompt(
@@ -333,7 +292,6 @@ def validate_mismatched_skeleton(
 
     The checks run depend on mismatch_type:
     - "seniority": structural → seniority_years → seniority_mismatch → skill_domain_overlap
-    - "domain": structural → seniority_years → domain_mismatch
     - "responsibility": structural → seniority_years → responsibility_mismatch
 
     Stops at the first failure. Before validation, normalizes seniority and domain
@@ -344,7 +302,7 @@ def validate_mismatched_skeleton(
         resume_info: ResumeInfo dict with seniority, years_experience,
                      primary_skills, and domain.
         model: Ollama model name (default: OLLAMA_MODEL from config).
-        mismatch_type: Type of mismatch ("seniority", "domain", "responsibility").
+        mismatch_type: Type of mismatch ("seniority", "responsibility").
 
     Returns:
         Dict with keys:
@@ -366,12 +324,6 @@ def validate_mismatched_skeleton(
             ("seniority_mismatch", lambda: validate_seniority_mismatch(job, resume_info)),
             ("skill_domain_overlap", lambda: validate_skill_domain_overlap(job, resume_info, model)),
         ]
-    elif mismatch_type == "domain":
-        checks = [
-            ("structural", lambda: validate_structural(job, model)),
-            ("seniority_years", lambda: validate_seniority_years(job, model)),
-            ("domain_mismatch", lambda: validate_domain_mismatch(job, resume_info)),
-        ]
     elif mismatch_type == "responsibility":
         checks = [
             ("structural", lambda: validate_structural(job, model)),
@@ -381,7 +333,7 @@ def validate_mismatched_skeleton(
     else:
         raise ValueError(
             f"Unknown mismatch_type: {mismatch_type!r}. "
-            f"Must be one of 'seniority', 'domain', 'responsibility'."
+            f"Must be one of 'seniority', 'responsibility'."
         )
 
     for check_name, check_fn in checks:
