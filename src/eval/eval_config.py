@@ -34,6 +34,23 @@ TUNE_RESUME_EMBEDDINGS_CACHE: str = "data/eval/tune/resume_embeddings.npz"
 TUNE_RESUME_EMBEDDINGS_HASH: str = "data/eval/tune/resume_embeddings.hash"
 TUNE_SAMPLED_JOBS_HASH: str = "data/eval/tune/sampled_jobs.hash"
 
+# ChromaDB (test-specific collection, separate from tune)
+CHROMA_TEST_EVAL_DIR: str = "data/chroma_test_eval"
+CHROMA_TEST_EVAL_COLLECTION: str = "test_eval"
+
+# Test set paths
+TEST_RESUMES_PATH: str = "data/eval/test/resumes.csv"
+TEST_POSITIVES_PATH: str = "data/eval/test/positives.csv"
+TEST_RESULTS_JSON: str = "data/eval/results/test_eval_results.json"
+TEST_MISSED_CSV: str = "data/eval/results/test_missed_positives.csv"
+
+# Cache paths for test set embeddings
+TEST_POSITIVE_EMBEDDINGS_CACHE: str = "data/eval/test/positive_embeddings.npz"
+TEST_POSITIVE_EMBEDDINGS_HASH: str = "data/eval/test/positive_embeddings.hash"
+TEST_RESUME_EMBEDDINGS_CACHE: str = "data/eval/test/resume_embeddings.npz"
+TEST_RESUME_EMBEDDINGS_HASH: str = "data/eval/test/resume_embeddings.hash"
+TEST_SAMPLED_JOBS_HASH: str = "data/eval/test/sampled_jobs.hash"
+
 # MLflow Tracking
 MLFLOW_TRACKING_URI: str = "data/eval/mlflow"
 MLFLOW_EXPERIMENT_NAME: str = "resume-job-matching-rag"
