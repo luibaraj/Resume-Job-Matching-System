@@ -29,6 +29,7 @@ from config import (
     GENERATION_TEMPERATURE,
     GENERATION_TOP_P,
     OLLAMA_MODEL,
+    PROMPT_MAX_CHARS,
     RESPONSIBILITY_MAX_TOKENS,
     RESUME_EXTRACT_MAX_TOKENS,
     SKILLS_MAX_TOKENS,
@@ -169,7 +170,17 @@ def _build_years_extraction_prompt(resume_text: str) -> str:
 
     Returns:
         Prompt string requesting single-line output with YearsExperience field.
+
+    Warning:
+        Logs a warning if resume_text exceeds PROMPT_MAX_CHARS.
     """
+    if len(resume_text) > PROMPT_MAX_CHARS:
+        logger.warning(
+            "Resume text length %d exceeds PROMPT_MAX_CHARS %d; may cause truncation",
+            len(resume_text),
+            PROMPT_MAX_CHARS,
+        )
+
     return f"""Resume: {resume_text}
 
 Extract the total years of professional work experience from this resume.
@@ -308,7 +319,17 @@ def _build_skills_prompt(resume_text: str, seniority: str, domain: str) -> str:
 
     Returns:
         Prompt string requesting skills output.
+
+    Warning:
+        Logs a warning if resume_text exceeds PROMPT_MAX_CHARS.
     """
+    if len(resume_text) > PROMPT_MAX_CHARS:
+        logger.warning(
+            "Resume text length %d exceeds PROMPT_MAX_CHARS %d; may cause truncation",
+            len(resume_text),
+            PROMPT_MAX_CHARS,
+        )
+
     return f"""Resume: {resume_text}
 
 Generate skills for a {seniority} {domain} engineer job that matches this resume.
@@ -378,7 +399,17 @@ def _build_responsibility_prompt(
 
     Returns:
         Prompt string requesting a single responsibility.
+
+    Warning:
+        Logs a warning if resume_text exceeds PROMPT_MAX_CHARS.
     """
+    if len(resume_text) > PROMPT_MAX_CHARS:
+        logger.warning(
+            "Resume text length %d exceeds PROMPT_MAX_CHARS %d; may cause truncation",
+            len(resume_text),
+            PROMPT_MAX_CHARS,
+        )
+
     prompt = f"""Resume: {resume_text}
 
 Generate ONE responsibility for a {seniority} {domain} engineer job.

@@ -25,6 +25,7 @@ from config import (
     GENERATION_TOP_P,
     MAX_BATCH_SIZE,
     OLLAMA_MODEL,
+    PROMPT_MAX_CHARS,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,17 @@ def _parse_resume_match(raw_response: str) -> str | None:
 
 
 def _build_requirements_prompt(job_posting: str) -> str:
-    """Build prompt for extracting required skills from job posting."""
+    """Build prompt for extracting required skills from job posting.
+
+    Validates job_posting length against PROMPT_MAX_CHARS to prevent token overflow.
+    """
+    if len(job_posting) > PROMPT_MAX_CHARS:
+        logger.warning(
+            "Job posting length %d exceeds PROMPT_MAX_CHARS %d; may cause truncation",
+            len(job_posting),
+            PROMPT_MAX_CHARS,
+        )
+
     return f"""You are an expert at identifying key job requirements from posting text.
 Your task: Extract the top 3-5 required skills or qualifications from this job posting.
 
@@ -125,7 +136,17 @@ Required skills (copy exact text, one per line):"""
 
 
 def _build_resume_match_prompt(resume: str, requirement: str) -> str:
-    """Build prompt for finding a resume span that matches a requirement."""
+    """Build prompt for finding a resume span that matches a requirement.
+
+    Validates resume length against PROMPT_MAX_CHARS to prevent token overflow.
+    """
+    if len(resume) > PROMPT_MAX_CHARS:
+        logger.warning(
+            "Resume length %d exceeds PROMPT_MAX_CHARS %d; may cause truncation",
+            len(resume),
+            PROMPT_MAX_CHARS,
+        )
+
     return f"""You are an expert at finding evidence in resumes.
 Your task: Find the shortest exact phrase in this resume that demonstrates the requirement "{requirement}".
 

@@ -207,6 +207,9 @@ async def main():
     # Load environment variables (after argparse, after logging)
     load_dotenv()
 
+    # Parse board tokens from environment variable
+    board_tokens = [t.strip() for t in os.getenv("GREENHOUSE_BOARD_TOKENS", "").split(",") if t.strip()]
+
     # Generate unique run ID for tracing this execution
     run_id = uuid.uuid4().hex[:8]
 

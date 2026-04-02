@@ -54,6 +54,7 @@ SKELETON_MAX_TOKENS: int = 200
 VALIDATION_MAX_TOKENS: int = 50
 REPAIR_MAX_TOKENS: int = 200  # Same output format as SKELETON_MAX_TOKENS
 MAX_BATCH_SIZE: int = 2
+PROMPT_MAX_CHARS: int = 8000  # Max char length for LLM prompts (safety guard)
 
 # Synthetic positives generation (per-field strategy)
 TARGET_RESPONSIBILITY_COUNT: int = 4  # Target within valid 3–5 range
