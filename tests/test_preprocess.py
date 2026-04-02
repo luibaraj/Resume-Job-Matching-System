@@ -521,3 +521,59 @@ class TestBatchProcessing:
         assert "<" not in cleaned
         assert "Python" in cleaned
         assert "Engineer" in cleaned
+
+
+class TestErrorIsolation:
+    """Test error isolation and graceful degradation."""
+
+    def test_bad_row_isolated(self, tmp_db, caplog):
+        """One bad row is isolated; others process successfully."""
+        conn = sqlite3.connect(tmp_db)
+        cursor = conn.cursor()
+        # Insert 3 test jobs
+        for i in range(3):
+            cursor.execute(
+                "INSERT INTO jobs (external_id, board_token, description) "
+                "VALUES (?, ?, ?)",
+                (f"ext_{i}", "token", f"<p>Job {i}</p>"),
+            )
+        conn.commit()
+        conn.close()
+
+        # Mock preprocess_description to fail on the second job
+        from unittest.mock import patch
+
+        original_preprocess = preprocess_description
+
+        def mock_preprocess(text):
+            if text == "<p>Job 1</p>":
+                raise ValueError("Simulated preprocessing failure")
+            return original_preprocess(text)
+
+        with patch("preprocess_jobs.preprocess_description", side_effect=mock_preprocess):
+            run_preprocessing(tmp_db)
+
+        # Verify all 3 rows are processed despite one failure
+        conn = sqlite3.connect(tmp_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM jobs WHERE preprocessed=1")
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        assert count == 3
+        # Verify warning was logged for the bad row
+        assert "Failed to preprocess job" in caplog.text
+
+    def test_main_db_path_arg(self, tmp_db):
+        """main() correctly passes --db-path argument to run_preprocessing()."""
+        from unittest.mock import patch
+
+        with patch("sys.argv", ["preprocess_jobs.py", "--db-path", tmp_db]):
+            with patch("preprocess_jobs.run_preprocessing") as mock_run:
+                # Import main and execute
+                from preprocess_jobs import main
+
+                main()
+
+                # Verify run_preprocessing was called with correct db_path
+                mock_run.assert_called_once_with(tmp_db)

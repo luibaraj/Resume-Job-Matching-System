@@ -57,16 +57,19 @@ def run_embedding(db_path: str, voyage_api_key: str) -> None:
         skipped_count = 0
         start = time.monotonic()
 
+        last_id = 0
         while True:
             cur.execute(
                 "SELECT id, cleaned_description FROM jobs "
                 "WHERE embedded=0 AND cleaned_description IS NOT NULL AND cleaned_description != '' "
-                "LIMIT ? OFFSET 0",
-                (DB_CHUNK_SIZE,),
+                "AND id > ? "
+                "ORDER BY id LIMIT ?",
+                (last_id, DB_CHUNK_SIZE),
             )
             chunk = cur.fetchall()
             if not chunk:
                 break
+            last_id = chunk[-1]["id"]
 
             # Split into Voyage AI sub-batches
             for batch_start in range(0, len(chunk), VOYAGE_BATCH_SIZE):
