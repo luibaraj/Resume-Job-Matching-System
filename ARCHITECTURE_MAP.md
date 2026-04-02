@@ -3,46 +3,46 @@
 ## Core Components
 
 ### Data Processing
-- `src/preprocess.py`: HTML cleaning and text normalization
-- `src/regex_extraction.py`: Pattern matching for job requirements
+- `src/preprocess.py`: HTML cleaning pipeline (5-step normalization)
+- `src/regex_extraction.py`: Pattern matching for job requirements (seniority, years, etc)
 - `scripts/pipeline/preprocess_jobs.py`: Job preprocessing pipeline
 
 ### Database
-- `src/db_utils.py`: Database utility functions
-- `src/embedding.py`: Embedding serialization/deserialization
+- `src/db_utils.py`: SQLite utilities (schema migrations)
+- `src/embedding.py`: VoyageAI embeddings (serialization, batch processing)
 
 ### Evaluation System
 #### Positive Generation
-- `src/eval/positive_gen/`: Modules for generating positive job matches
-  - `positives_gen.py`: Core job skeleton generation
-  - `positives_repair.py`: Fixing invalid job skeletons
-  - `positives_validate.py`: Validation logic
-  - `positives_pipeline.py`: End-to-end pipeline
+- `src/eval/positive_gen/`: Generate matching job postings
+  - `positives_gen.py`: Core job skeleton generation using LLMs
+  - `positives_repair.py`: Fix invalid job skeletons via LLM feedback
+  - `positives_validate.py`: Validate job-resume alignment
+  - `positives_pipeline.py`: End-to-end pipeline (generate → validate → repair)
 
 #### Negative Generation  
-- `src/eval/negative_gen/`: Modules for generating negative job matches
-  - `negatives_gen.py`: Core mismatch generation
-  - `negatives_repair.py`: Fixing invalid mismatches
-  - `negatives_validate.py`: Validation logic
+- `src/eval/negative_gen/`: Generate mismatched job postings
+  - `negatives_gen.py`: Create mismatches (seniority, skills, etc)
+  - `negatives_repair.py`: Fix invalid mismatches via LLM feedback
+  - `negatives_validate.py`: Validate mismatch quality
 
 #### Evaluation Infrastructure
-- `src/eval/collection.py`: ChromaDB collection management
-- `src/eval/data_loading.py`: Data sampling and loading
-- `src/eval/embedding_cache.py`: Embedding caching system
-- `src/eval/metrics.py`: Evaluation metrics calculation
-- `src/eval/reporting.py`: Results reporting
-- `src/eval/types.py`: Type definitions
+- `src/eval/collection.py`: ChromaDB collection management (tune/test splits)
+- `src/eval/data_loading.py`: Data sampling and SQLite queries
+- `src/eval/embedding_cache.py`: Embedding caching with hash verification
+- `src/eval/metrics.py`: Evaluation metrics (precision@k, recall@k)
+- `src/eval/reporting.py`: Results reporting (JSON, CSV)
+- `src/eval/types.py`: Type definitions (TypedDicts)
 
 ### Job Matching
-- `src/generation.py`: Core matching pipeline
-- `src/retrieval.py`: Job retrieval from ChromaDB
-- `src/reranking.py`: Cohere-based reranking
+- `src/generation.py`: Core matching pipeline (requirements → matches)
+- `src/retrieval.py`: Job retrieval from ChromaDB (vector search)
+- `src/reranking.py`: Cohere-based reranking (contextual relevance)
 
 ### Scraping
-- `src/greenhouse_scraper.py`: Greenhouse job board scraping
+- `src/greenhouse_scraper.py`: Greenhouse job board scraping (published jobs)
 
 ## Scripts
-- `scripts/eval/`: Evaluation scripts
+- `scripts/eval/`: Evaluation runners
   - `run_test_eval.py`: Test evaluation runner
   - `run_tuning_eval.py`: Tuning evaluation runner
 
@@ -53,4 +53,4 @@
   - `test_reranking.py`: Reranking tests
 
 ## Configuration
-- `.gitignore`: Git ignore rules
+- `.gitignore`: Git ignore rules (Python, IDE, logs, etc)
