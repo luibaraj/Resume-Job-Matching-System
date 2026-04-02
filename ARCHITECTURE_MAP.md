@@ -34,6 +34,19 @@
 - `src/eval/types.py`: Type definitions (TypedDicts)
 
 ### Job Matching
+
+### Key Workflow
+```mermaid
+graph TD
+    A[Job Postings] -->|Scrape| B(GreenhouseScraper)
+    B -->|Store| C[(SQLite DB)]
+    C -->|Preprocess| D[generation.py]
+    D -->|Embed| E[embedding.py]
+    E -->|Vector Search| F[retrieval.py]
+    F -->|Top Candidates| G[reranking.py]
+    G -->|Ranked Matches| H[eval/reporting.py]
+```
+
 - `src/generation.py`: Core matching pipeline (requirements → matches)
 - `src/retrieval.py`: Job retrieval from ChromaDB (vector search)
 - `src/reranking.py`: Cohere-based reranking (contextual relevance)
