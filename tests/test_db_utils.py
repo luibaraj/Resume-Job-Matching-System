@@ -1,9 +1,13 @@
 """Tests for src/db_utils.py."""
 
+import os
+import sys
 import sqlite3
 
 import pytest
 
+# Ensure src module can be imported by adding project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.db_utils import add_column_if_missing
 
 
