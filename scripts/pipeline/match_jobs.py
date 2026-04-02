@@ -5,11 +5,13 @@ Reads resume from data/user_profile.txt, retrieves top 100 candidates via dense 
 reranks them to top 10 using Cohere Rerank 3, and outputs results to matched_jobs.md.
 """
 
+import argparse
 import hashlib
 import logging
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 import chromadb
@@ -17,14 +19,16 @@ import numpy as np
 from dotenv import load_dotenv
 
 # Ensure src/ can be imported from any working directory
-src_path = str(Path(__file__).resolve().parent.parent.parent / "src")
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from config import (
     CHROMA_COLLECTION_NAME,
     CHROMA_DEFAULT_DIR,
+    CORPUS_LIMITATION_MESSAGE,
     DB_DEFAULT_PATH,
+    EMBEDDING_DIM,
     HNSW_EF,
     HNSW_EF_CONSTRUCTION,
     OLLAMA_MODEL,
@@ -46,10 +50,15 @@ from reranking import rerank_jobs
 import ollama
 from generation import run_generation_pipeline
 
+logger = logging.getLogger(__name__)
 
-def load_resume() -> str:
+
+def load_resume(resume_path: str | None = None) -> str:
     """
-    Load resume text from data/user_profile.txt.
+    Load resume text from file.
+
+    Args:
+        resume_path: Path to resume file. Defaults to data/user_profile.txt.
 
     Returns:
         Stripped resume text.
@@ -57,16 +66,18 @@ def load_resume() -> str:
     Raises:
         SystemExit: If file not found or empty.
     """
-    resume_path = "data/user_profile.txt"
+    if resume_path is None:
+        resume_path = str(_PROJECT_ROOT / "data" / "user_profile.txt")
+
     try:
         with open(resume_path, "r", encoding="utf-8") as f:
             resume_text = f.read().strip()
     except FileNotFoundError:
-        print(f"Error: Resume file not found: {resume_path}", file=sys.stderr)
+        logger.error("Resume file not found: %s", resume_path)
         sys.exit(1)
 
     if not resume_text:
-        print("Error: Resume is empty.", file=sys.stderr)
+        logger.error("Resume is empty.")
         sys.exit(1)
 
     return resume_text
@@ -86,7 +97,7 @@ def extract_user_filters(resume_text: str):
     user_seniority = extract_user_seniority(resume_text)
     user_years = extract_user_years_experience(resume_text)
 
-    logging.info(
+    logger.info(
         "User profile — degree: %d, seniority: %d, years: %d",
         user_degree,
         user_seniority,
@@ -119,7 +130,8 @@ def load_or_embed_resume(
     Load cached resume embedding if available and valid, otherwise embed and cache.
 
     Cache is invalidated if the resume text (detected via MD5 hash) has changed.
-    Uses np.save/np.load for efficient binary storage.
+    Uses np.save/np.load for efficient binary storage. If cache load fails, falls
+    back to re-embedding and caching.
 
     Args:
         client: Voyage AI client.
@@ -138,11 +150,18 @@ def load_or_embed_resume(
     if cache.exists() and hash_file.exists():
         saved_hash = hash_file.read_text().strip()
         if saved_hash == current_hash:
-            logging.info("Loading cached resume embedding...")
-            return np.load(str(cache))
+            logger.info("Loading cached resume embedding...")
+            try:
+                return np.load(str(cache))
+            except Exception as e:
+                logger.warning(
+                    "Failed to load cached embedding: %s. Re-embedding.",
+                    e,
+                )
+                # Fall through to re-embed
 
-    # Cache miss: embed, save, and cache the hash
-    logging.info("Embedding resume...")
+    # Cache miss or load failure: embed, save, and cache the hash
+    logger.info("Embedding resume...")
     embeddings = embed_batch(client, [resume_text])
     embedding = embeddings[0]
 
@@ -150,7 +169,7 @@ def load_or_embed_resume(
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.save(str(cache), embedding)
     hash_file.write_text(current_hash)
-    logging.info(f"Resume embedding cached to {cache_path}")
+    logger.info("Resume embedding cached to %s", cache_path)
 
     return embedding
 
@@ -176,7 +195,7 @@ def build_chroma_client(
     if rebuild:
         try:
             chroma_client.delete_collection(CHROMA_COLLECTION_NAME)
-            logging.info(f"Deleted existing collection '{CHROMA_COLLECTION_NAME}'.")
+            logger.info("Deleted existing collection '%s'.", CHROMA_COLLECTION_NAME)
         except ValueError:
             # Collection doesn't exist — silently continue
             pass
@@ -193,8 +212,6 @@ def write_results_markdown(results: list[dict], output_path: str = "matched_jobs
                 location, source_url, board_token, cleaned_description.
         output_path: Path to write the Markdown file (default: matched_jobs.md).
     """
-    from config import CORPUS_LIMITATION_MESSAGE
-
     lines = ["# Top Matched Jobs (Reranked)\n"]
 
     # Filter to only jobs with explanations
@@ -224,7 +241,7 @@ def write_results_markdown(results: list[dict], output_path: str = "matched_jobs
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"Results written to {output_path}")
+    logger.info("Results written to %s.", output_path)
 
 
 def run_generation_for_results(
@@ -239,7 +256,7 @@ def run_generation_for_results(
     explanation string to each result dict under "explanation", or None if
     no grounded match was found. Exits early if Ollama is unreachable.
     """
-    logging.info("Running generation pipeline for %d results...", len(results))
+    logger.info("Running generation pipeline for %d results...", len(results))
 
     for job in results:
         description = job.get("cleaned_description", "")
@@ -253,22 +270,22 @@ def run_generation_for_results(
                 model=model,
             )
         except ollama.RequestError as e:
-            logging.warning("Ollama is not reachable: %s. Skipping generation.", e)
+            logger.warning("Ollama is not reachable: %s. Skipping generation.", e)
             for remaining in results:
                 remaining.setdefault("explanation", None)
             return
         except ollama.ResponseError as e:
-            logging.warning("Ollama model error for job '%s': %s. Skipping.", job.get("title"), e)
+            logger.warning("Ollama model error for job '%s': %s. Skipping.", job.get("title"), e)
             job["explanation"] = None
             continue
         except Exception as e:
-            logging.warning("Unexpected generation error for job '%s': %s. Skipping.", job.get("title"), e)
+            logger.warning("Unexpected generation error for job '%s': %s. Skipping.", job.get("title"), e)
             job["explanation"] = None
             continue
 
         if isinstance(generation_output, str):
             # CORPUS_LIMITATION_MESSAGE returned — no grounded match found
-            logging.info("No grounded match for job '%s'.", job.get("title"))
+            logger.info("No grounded match for job '%s'.", job.get("title"))
             job["explanation"] = None
         else:
             # list[PairResult] with exactly one element (we sent one pair)
@@ -277,109 +294,151 @@ def run_generation_for_results(
 
 def main() -> None:
     """Main orchestration function."""
-    # Load environment variables
+    # Parse arguments
+    parser = argparse.ArgumentParser(
+        description="Match resume to job listings using dense retrieval and reranking."
+    )
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help="SQLite database path (default: DB_PATH env var or config default)",
+    )
+    parser.add_argument(
+        "--resume-path",
+        default=None,
+        help="Path to resume file (default: data/user_profile.txt)",
+    )
+    parser.add_argument(
+        "--output-path",
+        default="matched_jobs.md",
+        help="Output markdown file (default: matched_jobs.md)",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Rebuild ChromaDB collection (clears old embeddings)",
+    )
+    args = parser.parse_args()
+
+    # Configure logging (after argparse)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+    # Load environment variables (after argparse, after logging)
     load_dotenv()
 
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # Validate required API keys early (before expensive operations)
+    voyage_api_key = os.getenv("VOYAGE_API_KEY")
+    if not voyage_api_key:
+        logger.error("VOYAGE_API_KEY environment variable is not set.")
+        sys.exit(1)
 
-    # Resolve database path: env var → default
-    db_path = os.getenv("DB_PATH", DB_DEFAULT_PATH)
+    cohere_api_key = os.getenv("COHERE_API_KEY")
+    if not cohere_api_key:
+        logger.error("COHERE_API_KEY environment variable is not set.")
+        sys.exit(1)
+
+    # Resolve database path: arg → env var → default
+    db_path = args.db_path or os.getenv("DB_PATH", DB_DEFAULT_PATH)
 
     # Validate database exists
     db_path_obj = Path(db_path)
     if not db_path_obj.exists():
-        print(
-            f"Error: Database not found at {db_path}. "
-            "Please run the pipeline scripts first: "
+        logger.error(
+            "Database not found at %s. Please run the pipeline scripts first: "
             "python scripts/scrape_jobs.py && "
             "python scripts/preprocess_jobs.py && "
             "python scripts/embed_jobs.py",
-            file=sys.stderr,
+            db_path,
         )
         sys.exit(1)
 
     # Load resume
-    resume_text = load_resume()
-    logging.info(f"Loaded resume ({len(resume_text)} characters).")
+    resume_text = load_resume(args.resume_path)
+    logger.info("Loaded resume (%d characters).", len(resume_text))
 
     # Extract user profile criteria for filtering
     query_filter = extract_user_filters(resume_text)
-    logging.info("Applying filters: %s", describe_chroma_filter(query_filter))
+    logger.info("Applying filters: %s", describe_chroma_filter(query_filter))
 
-    # Build Chroma client (never rebuild in non-interactive context)
-    chroma_client = build_chroma_client(CHROMA_DEFAULT_DIR, rebuild=False)
+    # Build Chroma client (rebuild only if explicitly requested via --rebuild)
+    chroma_client = build_chroma_client(CHROMA_DEFAULT_DIR, rebuild=args.rebuild)
 
     # Connect to database and build/sync Chroma collection
     try:
         conn = sqlite3.connect(db_path)
         try:
-            logging.info("Building ChromaDB collection from embeddings...")
+            # Time build_collection
+            logger.info("Building ChromaDB collection from embeddings...")
+            start_build = time.monotonic()
             collection = build_collection(
                 conn, chroma_client, CHROMA_COLLECTION_NAME, ef_construction=HNSW_EF_CONSTRUCTION
             )
-            logging.info(f"Collection ready with {collection.count()} jobs indexed.")
+            elapsed_build = time.monotonic() - start_build
+            logger.info("Collection ready with %d jobs indexed in %.2fs.", collection.count(), elapsed_build)
 
             # Sanity check: ensure we have embedded jobs
             if collection.count() == 0:
-                print(
-                    "Error: No embedded jobs found in the database. "
-                    "Please run the pipeline scripts first:\n"
-                    "  python scripts/preprocess_jobs.py\n"
-                    "  python scripts/embed_jobs.py",
-                    file=sys.stderr,
+                logger.error(
+                    "No embedded jobs found in the database. "
+                    "Please run the pipeline scripts first: "
+                    "python scripts/preprocess_jobs.py && "
+                    "python scripts/embed_jobs.py."
                 )
                 sys.exit(1)
 
-            # Create Voyage client and embed resume
-            voyage_api_key = os.getenv("VOYAGE_API_KEY")
-            if not voyage_api_key:
-                print(
-                    "Error: VOYAGE_API_KEY environment variable is not set.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-
-            # Validate Cohere API key
-            cohere_api_key = os.getenv("COHERE_API_KEY")
-            if not cohere_api_key:
-                print(
-                    "Error: COHERE_API_KEY environment variable is not set.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-
+            # Time load_or_embed_resume
             voyage_client = create_client(voyage_api_key)
+            start_resume = time.monotonic()
             query_embedding = load_or_embed_resume(voyage_client, resume_text)
-            logging.info(f"Resume embedding shape: {query_embedding.shape}")
+            elapsed_resume = time.monotonic() - start_resume
+            logger.info("Resume embedding loaded/computed in %.2fs, shape: %s", elapsed_resume, query_embedding.shape)
 
-            # Step 1: Dense retrieval — top 100 candidates
-            logging.info(f"Querying for top {RETRIEVE_TOP_K} candidates...")
+            # Step 1: Time dense retrieval — top 100 candidates
+            logger.info("Querying for top %d candidates...", RETRIEVE_TOP_K)
+            start_query = time.monotonic()
             candidates = query_collection(
                 collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF, where=query_filter
             )
+            elapsed_query = time.monotonic() - start_query
+            logger.info("Queried %d candidates in %.2fs.", len(candidates), elapsed_query)
 
-            # Step 2: Rerank — top 10 results
-            logging.info(f"Reranking {len(candidates)} candidates to top {RERANK_TOP_N}...")
+            # Step 2: Time rerank — top 10 results
+            logger.info("Reranking %d candidates to top %d...", len(candidates), RERANK_TOP_N)
+            start_rerank = time.monotonic()
             results = rerank_jobs(
                 resume_text, candidates, top_n=RERANK_TOP_N, api_key=cohere_api_key
             )
+            elapsed_rerank = time.monotonic() - start_rerank
+            logger.info("Reranked to %d results in %.2fs.", len(results), elapsed_rerank)
 
             # Output results
             if len(results) == 0:
-                print("No matching jobs found.")
+                logger.warning("No matching jobs found.")
             else:
-                # Step 3: Generation — attach fit explanations
+                # Step 3: Time generation — attach fit explanations
+                logger.info("Running generation pipeline...")
+                start_gen = time.monotonic()
                 run_generation_for_results(resume_text, results)
-                write_results_markdown(results)
+                elapsed_gen = time.monotonic() - start_gen
+                logger.info("Generation completed in %.2fs.", elapsed_gen)
+                write_results_markdown(results, args.output_path)
 
         finally:
             conn.close()
     except sqlite3.DatabaseError as e:
-        print(f"Error reading database: {e}", file=sys.stderr)
+        logger.error("Error reading database: %s", e)
         sys.exit(1)
     except ValueError as e:
-        print(f"Error building collection (corrupt embeddings?): {e}", file=sys.stderr)
+        logger.error("Error building collection (corrupt embeddings?): %s", e)
         sys.exit(1)
 
 
