@@ -10,6 +10,7 @@ Reads 3 source CSVs (resumes, positives, negatives) and outputs:
 Stratification is by (seniority, domain) on resumes; split is 30 tune / 20 test using
 the Hamilton (largest remainder) method for proportional allocation.
 """
+import argparse
 import json
 import logging
 from datetime import datetime
@@ -28,7 +29,7 @@ def load_data(project_root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     """Load and normalize synthetic eval data from CSVs."""
     eval_dir = project_root / "data" / "eval"
 
-    logger.info(f"Loading data from {eval_dir}")
+    logger.info("Loading data from %s", eval_dir)
     resumes = pd.read_csv(eval_dir / "synthetic_resume.csv")
     positives = pd.read_csv(eval_dir / "synthetic_job_descriptions.csv")
     negatives = pd.read_csv(eval_dir / "synthetic_negative_job_descriptions.csv")
@@ -40,7 +41,7 @@ def load_data(project_root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     # Build flat stratification key: "junior_backend", "senior_data", etc.
     resumes["strata_key"] = resumes["seniority"] + "_" + resumes["domain"]
 
-    logger.info(f"Loaded {len(resumes)} resumes, {len(positives)} positives, {len(negatives)} negatives")
+    logger.info("Loaded %d resumes, %d positives, %d negatives", len(resumes), len(positives), len(negatives))
     return resumes, positives, negatives
 
 
@@ -117,7 +118,7 @@ def compute_stratified_split(
 
     test_ids = set(resumes_df["id"].tolist()) - tune_ids
 
-    logger.info(f"Split: {len(tune_ids)} tune, {len(test_ids)} test")
+    logger.info("Split: %d tune, %d test", len(tune_ids), len(test_ids))
     return tune_ids, test_ids
 
 
@@ -177,8 +178,8 @@ def write_outputs(outputs: dict[str, pd.DataFrame], eval_dir: Path) -> None:
     outputs["test_positives"].to_csv(test_dir / "positives.csv", index=False)
     outputs["test_negatives"].to_csv(test_dir / "negatives.csv", index=False)
 
-    logger.info(f"Wrote tune/: {len(outputs['tune_resumes'])} resumes, {len(outputs['tune_positives'])} positives")
-    logger.info(f"Wrote test/: {len(outputs['test_resumes'])} resumes, {len(outputs['test_positives'])} positives, {len(outputs['test_negatives'])} negatives")
+    logger.info("Wrote tune/: %d resumes, %d positives", len(outputs['tune_resumes']), len(outputs['tune_positives']))
+    logger.info("Wrote test/: %d resumes, %d positives, %d negatives", len(outputs['test_resumes']), len(outputs['test_positives']), len(outputs['test_negatives']))
 
 
 def build_summary(
@@ -237,7 +238,7 @@ def write_summary(summary: dict, path: Path) -> None:
     """Write summary report to JSON file."""
     with open(path, "w") as f:
         json.dump(summary, f, indent=2)
-    logger.info(f"Wrote summary to {path}")
+    logger.info("Wrote summary to %s", path)
 
 
 def print_summary(summary: dict) -> None:
@@ -266,7 +267,21 @@ def print_summary(summary: dict) -> None:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Stratify and split eval data into tune/test sets")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    args = parser.parse_args()
+
+    # Configure logging (after argparse)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="[%(asctime)s] %(levelname)s: %(message)s",
+    )
 
     # Resolve project root from script location
     project_root = Path(__file__).resolve().parent.parent.parent

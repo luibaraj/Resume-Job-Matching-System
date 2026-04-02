@@ -10,6 +10,7 @@ import sqlite3
 from typing import Optional, TypedDict
 
 import chromadb
+from chromadb.api import ClientAPI
 import numpy as np
 
 from config import (
@@ -50,7 +51,7 @@ class JobResult(TypedDict):
 
 def build_collection(
     conn: sqlite3.Connection,
-    chroma_client: chromadb.PersistentClient,
+    chroma_client: ClientAPI,
     collection_name: str = DEFAULT_COLLECTION_NAME,
     ef_construction: int = 100,
 ) -> chromadb.Collection:
@@ -64,7 +65,7 @@ def build_collection(
 
     Args:
         conn: An open sqlite3.Connection to the jobs database.
-        chroma_client: A chromadb.PersistentClient instance.
+        chroma_client: A chromadb Client instance.
         collection_name: Name of the Chroma collection. Defaults to "jobs".
         ef_construction: HNSW construction parameter controlling index build quality.
             Higher values (e.g., 200) produce better quality indices at the cost of slower build.
@@ -149,6 +150,7 @@ def query_collection(
     top_k: int = 10,
     ef: int = 10,
     where: Optional[dict] = None,
+    run_id: str | None = None,  # noqa: F841 (reserved for tracing)
 ) -> list[JobResult]:
     """
     Query a Chroma collection for the most similar jobs using dense vectors.
@@ -161,6 +163,7 @@ def query_collection(
             produce more accurate results at the cost of slower queries. Defaults to 10.
         where: Optional ChromaDB where filter dict. If provided, only jobs matching
             the filter are returned. Defaults to None (no filtering).
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         A list of JobResult dicts, ordered by ascending distance (most similar first).
@@ -171,6 +174,12 @@ def query_collection(
     if query_embedding.shape != (EMBEDDING_DIM,):
         raise ValueError(
             f"Expected query_embedding shape ({EMBEDDING_DIM},), got {query_embedding.shape}"
+        )
+
+    # Ensure embedding is in correct precision for ChromaDB
+    if query_embedding.dtype != np.float32:
+        raise ValueError(
+            f"Expected query_embedding dtype float32, got {query_embedding.dtype}"
         )
 
     collection.modify(metadata={"hnsw:ef": ef})
@@ -184,22 +193,51 @@ def query_collection(
     result = collection.query(**query_kwargs)
 
     # result.ids, result.distances, result.metadatas are all lists of lists (one per query)
+    assert result["ids"] is not None, "result['ids'] should not be None"
+    assert result["distances"] is not None, "result['distances'] should not be None"
+    assert result["metadatas"] is not None, "result['metadatas'] should not be None"
+
     ids = result["ids"][0]
     distances = result["distances"][0]
     metadatas = result["metadatas"][0]
 
-    return [
-        JobResult(
-            id=doc_id,
-            distance=float(dist),
-            title=meta.get("title", ""),
-            location=meta.get("location", ""),
-            source_url=meta.get("source_url", ""),
-            board_token=meta.get("board_token", ""),
-            cleaned_description=meta.get("cleaned_description", ""),
-            required_degree=meta.get("required_degree", DEGREE_UNKNOWN),
-            seniority_level=meta.get("seniority_level", SENIORITY_UNKNOWN),
-            min_years_experience=meta.get("min_years_experience", YEARS_UNKNOWN),
+    results = []
+    for doc_id, dist, meta in zip(ids, distances, metadatas):
+        # Ensure meta is a dict and extract values with safe defaults
+        assert isinstance(meta, dict), f"Expected dict metadata, got {type(meta)}"
+
+        # Extract string fields with safe defaults
+        title_val = meta.get("title")
+        title: str = str(title_val) if title_val else ""
+        location_val = meta.get("location")
+        location: str = str(location_val) if location_val else ""
+        source_url_val = meta.get("source_url")
+        source_url: str = str(source_url_val) if source_url_val else ""
+        board_token_val = meta.get("board_token")
+        board_token: str = str(board_token_val) if board_token_val else ""
+        cleaned_desc_val = meta.get("cleaned_description")
+        cleaned_description: str = str(cleaned_desc_val) if cleaned_desc_val else ""
+
+        # Extract int fields with safe defaults
+        degree_val = meta.get("required_degree", DEGREE_UNKNOWN)
+        required_degree: int = int(degree_val) if isinstance(degree_val, (int, str, float)) else DEGREE_UNKNOWN
+        seniority_val = meta.get("seniority_level", SENIORITY_UNKNOWN)
+        seniority_level: int = int(seniority_val) if isinstance(seniority_val, (int, str, float)) else SENIORITY_UNKNOWN
+        years_val = meta.get("min_years_experience", YEARS_UNKNOWN)
+        min_years_experience: int = int(years_val) if isinstance(years_val, (int, str, float)) else YEARS_UNKNOWN
+
+        results.append(
+            JobResult(
+                id=doc_id,
+                distance=float(dist),
+                title=title,
+                location=location,
+                source_url=source_url,
+                board_token=board_token,
+                cleaned_description=cleaned_description,
+                required_degree=required_degree,
+                seniority_level=seniority_level,
+                min_years_experience=min_years_experience,
+            )
         )
-        for doc_id, dist, meta in zip(ids, distances, metadatas)
-    ]
+    return results

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import voyageai
 
 import config
 import embedding
@@ -18,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 def embed_with_cache(
-    voyage_client,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]
     df: pd.DataFrame,
     id_col: str,
     text_col: str,
     cache_path: str,
     hash_path: str,
-    model: str = None,
+    model: str | None = None,
     skip_empty: bool = False,
 ) -> dict:
     """
@@ -59,16 +60,16 @@ def embed_with_cache(
             with open(hash_p) as f:
                 cached_hash = f.read().strip()
             if cached_hash == current_hash:
-                logger.info(f"Loading embeddings from cache: {cache_path}")
+                logger.info("Loading embeddings from cache: %s", cache_path)
                 cached = np.load(cache_p)
                 result = {k: cached[k] for k in cached.files}
-                logger.info(f"Loaded {len(result)} embeddings from cache")
+                logger.info("Loaded %d embeddings from cache", len(result))
                 return result
         except Exception as e:
-            logger.warning(f"Cache load failed: {e}; will re-embed")
+            logger.warning("Cache load failed: %s; will re-embed", e)
 
     # Embed
-    logger.info(f"Embedding from column: {text_col}")
+    logger.info("Embedding from column: %s", text_col)
     embeddings_dict = {}
     empty_count = 0
 
@@ -98,10 +99,10 @@ def embed_with_cache(
             for id_val, emb in zip(ids, embeddings):
                 embeddings_dict[id_val] = emb
 
-        logger.info(f"Embedded {len(embeddings_dict)}/{len(df)} items")
+        logger.info("Embedded %d/%d items", len(embeddings_dict), len(df))
 
     if empty_count > 0:
-        logger.warning(f"Skipped {empty_count} items with empty {text_col}")
+        logger.warning("Skipped %d items with empty %s", empty_count, text_col)
 
     # Cache
     cache_p.parent.mkdir(parents=True, exist_ok=True)
@@ -110,17 +111,17 @@ def embed_with_cache(
     with open(hash_p, "w") as f:
         f.write(current_hash)
 
-    logger.info(f"Cached {len(embeddings_dict)} embeddings to {cache_path}")
+    logger.info("Cached %d embeddings to %s", len(embeddings_dict), cache_path)
 
     return embeddings_dict
 
 
 def embed_positives(
-    voyage_client,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]
     positives_df: pd.DataFrame,
-    model: str = None,
-    cache_path: str = None,
-    hash_path: str = None,
+    model: str | None = None,
+    cache_path: str | None = None,
+    hash_path: str | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Embed synthetic positives, using cache if job_description hash matches.
@@ -148,11 +149,11 @@ def embed_positives(
 
 
 def embed_resumes(
-    voyage_client,
+    voyage_client: voyageai.Client,  # type: ignore[name-defined]
     resumes_df: pd.DataFrame,
-    model: str = None,
-    cache_path: str = None,
-    hash_path: str = None,
+    model: str | None = None,
+    cache_path: str | None = None,
+    hash_path: str | None = None,
 ) -> dict[int, np.ndarray]:
     """
     Embed all resumes, using cache if resume text hash matches.

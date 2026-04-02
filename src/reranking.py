@@ -4,6 +4,7 @@ Reranking module using Cohere Rerank 3 to reorder retrieved job results by relev
 
 import logging
 import os
+import random
 import time
 
 import cohere
@@ -58,6 +59,7 @@ def rerank_jobs(
     client: cohere.ClientV2 | None = None,
     max_retries: int = RERANK_MAX_RETRIES,
     retry_base_delay: float = RERANK_RETRY_BASE_DELAY,
+    run_id: str | None = None,
 ) -> list[JobResult]:
     """
     Rerank a list of JobResult dicts using Cohere Rerank 3.
@@ -73,6 +75,7 @@ def rerank_jobs(
         client: Pre-instantiated cohere.ClientV2. Takes precedence over api_key.
         max_retries: Maximum number of retry attempts on transient errors.
         retry_base_delay: Base delay in seconds for exponential back-off.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         Reranked list of JobResult, length <= top_n, best first.
@@ -101,14 +104,25 @@ def rerank_jobs(
         except Exception as exc:
             attempt += 1
             if attempt > max_retries:
-                logger.error(
-                    "rerank_jobs failed after %d attempts: %s (%s)",
-                    max_retries,
-                    type(exc).__name__,
-                    exc,
-                )
+                if run_id:
+                    logger.error(
+                        "rerank_jobs (run_id=%s) failed after %d attempts: %s (%s)",
+                        run_id,
+                        max_retries,
+                        type(exc).__name__,
+                        exc,
+                    )
+                else:
+                    logger.error(
+                        "rerank_jobs failed after %d attempts: %s (%s)",
+                        max_retries,
+                        type(exc).__name__,
+                        exc,
+                    )
                 raise
             delay = retry_base_delay * (2 ** (attempt - 1))
+            # Add jitter: ±10% of delay
+            delay += random.uniform(0, delay * 0.1)
             is_429 = "429" in str(exc) or "Too Many Requests" in str(exc)
             level = "rate-limited (429)" if is_429 else type(exc).__name__
             logger.warning(

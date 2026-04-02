@@ -5,7 +5,9 @@ Provides common LLM interfaces, prompt building, and data structures used by
 the positive and negative generation, validation, and repair modules.
 """
 
+import logging
 import sys
+import time
 from pathlib import Path
 from typing import TypedDict
 
@@ -21,6 +23,8 @@ from config import (
     VALIDATION_MAX_TOKENS,
 )
 from eval.positive_gen.positives_gen import JobSkeleton
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "_REPAIR_TEMPERATURE_ATTEMPT2",
@@ -46,63 +50,114 @@ class RepairResult(TypedDict):
     discard_reason: str | None  # Reason for discard; None on success
 
 
-def call_ollama_validate(prompt: str, model: str = OLLAMA_MODEL) -> str:
+def call_ollama_validate(prompt: str, model: str = OLLAMA_MODEL, max_retries: int = 1) -> str:
     """
     Call Ollama chat endpoint for validation and return response content.
+
+    Retries once on transient RequestError with short exponential backoff.
 
     Args:
         prompt: The prompt to send.
         model: Ollama model name.
+        max_retries: Number of retry attempts on transient errors.
 
     Returns:
         The LLM response text.
 
     Raises:
-        ollama.RequestError: If the request fails.
+        ollama.RequestError: If the request fails after all retries.
         ollama.ResponseError: If the model returns an error.
     """
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": GENERATION_TEMPERATURE,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": VALIDATION_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
+    attempt = 0
+    while True:
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": GENERATION_TEMPERATURE,
+                    "top_p": GENERATION_TOP_P,
+                    "num_predict": VALIDATION_MAX_TOKENS,
+                },
+            )
+            return response["message"]["content"]
+        except ollama.RequestError as e:
+            attempt += 1
+            if attempt > max_retries:
+                logger.error(
+                    "call_ollama_validate failed after %d attempts: %s",
+                    max_retries,
+                    e,
+                )
+                raise
+            # Short exponential backoff: 0.3s, then 0.6s
+            delay = 0.3 * (2 ** (attempt - 1))
+            logger.warning(
+                "call_ollama_validate attempt %d/%d failed: %s. Retrying in %.1fs...",
+                attempt,
+                max_retries,
+                e,
+                delay,
+            )
+            time.sleep(delay)
 
 
 def call_ollama_repair(
     prompt: str,
     model: str = OLLAMA_MODEL,
     temperature: float = GENERATION_TEMPERATURE,
+    max_retries: int = 2,
 ) -> str:
     """
     Call Ollama chat endpoint for repair and return response content.
+
+    Retries up to twice on transient RequestError with short exponential backoff.
 
     Args:
         prompt: The prompt to send.
         model: Ollama model name.
         temperature: Sampling temperature (0.0 to 1.0+).
+        max_retries: Number of retry attempts on transient errors.
 
     Returns:
         The LLM response text.
 
     Raises:
-        ollama.RequestError: If the request fails.
+        ollama.RequestError: If the request fails after all retries.
         ollama.ResponseError: If the model returns an error.
     """
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": temperature,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": REPAIR_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
+    attempt = 0
+    while True:
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": temperature,
+                    "top_p": GENERATION_TOP_P,
+                    "num_predict": REPAIR_MAX_TOKENS,
+                },
+            )
+            return response["message"]["content"]
+        except ollama.RequestError as e:
+            attempt += 1
+            if attempt > max_retries:
+                logger.error(
+                    "call_ollama_repair failed after %d attempts: %s",
+                    max_retries,
+                    e,
+                )
+                raise
+            # Short exponential backoff: 0.3s, then 0.6s
+            delay = 0.3 * (2 ** (attempt - 1))
+            logger.warning(
+                "call_ollama_repair attempt %d/%d failed: %s. Retrying in %.1fs...",
+                attempt,
+                max_retries,
+                e,
+                delay,
+            )
+            time.sleep(delay)
 
 
 def format_fields_for_prompt(job: JobSkeleton, fields: list[str]) -> str:
@@ -142,7 +197,7 @@ def merge_repaired_fields(
         # Only apply non-empty values — empty means the model didn't output this field
         if value:
             merged[field] = value
-    return merged
+    return merged  # type: ignore[return-value]
 
 
 def build_attempt1_prompt(

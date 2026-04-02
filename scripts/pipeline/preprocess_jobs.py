@@ -12,11 +12,9 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import DB_DEFAULT_PATH
+from src.config import DB_DEFAULT_PATH, DB_CHUNK_SIZE
 from src.db_utils import add_column_if_missing
 from src.preprocess import preprocess_description
-
-CHUNK_SIZE = 512
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +50,7 @@ def run_preprocessing(db_path: str) -> None:
             # Always query at OFFSET 0; committed rows drop out of WHERE preprocessed=0
             cur.execute(
                 "SELECT id, description FROM jobs WHERE preprocessed=0 LIMIT ? OFFSET 0",
-                (CHUNK_SIZE,),
+                (DB_CHUNK_SIZE,),
             )
             batch = cur.fetchall()
             if not batch:

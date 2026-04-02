@@ -48,6 +48,7 @@ from config import (
 from embedding import create_client
 from eval.collection import get_or_build_tune_collection, swap_positives
 from eval.embedding_cache import embed_positives, embed_resumes
+from eval.reporting import write_results_json, write_missed_positives_csv
 from eval.eval_config import (
     K_PRECISION,
     K_RECALL,
@@ -95,13 +96,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force re-sample jobs even if CSVs exist",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
     return parser.parse_args()
 
 
-def setup_logging() -> None:
+def setup_logging(log_level: str = "INFO") -> None:
     """Configure logging."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, log_level),
         format="[%(asctime)s] %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
@@ -146,7 +153,7 @@ def retrieve_for_resume(
             resume_positives_df["resume_id"] == resume_id
         ]
         if len(resume_positives) == 0:
-            logger.warning(f"No positives for resume {resume_id}")
+            logger.warning("No positives for resume %s", resume_id)
             return None
 
         current_positive_ids = swap_positives(
@@ -162,7 +169,7 @@ def retrieve_for_resume(
         return (retrieved, set(current_positive_ids))
 
     except Exception as e:
-        logger.error(f"Error retrieving for resume {resume_id}: {e}", exc_info=True)
+        logger.error("Error retrieving for resume %s: %s", resume_id, e, exc_info=True)
         return None
 
 
@@ -313,221 +320,16 @@ def score_resume(
         )
 
     except Exception as e:
-        logger.error(f"Error scoring resume {resume_id}: {e}", exc_info=True)
+        logger.error("Error scoring resume %s: %s", resume_id, e, exc_info=True)
         return None
 
 
-def _sanitize_metric_name(name: str) -> str:
-    """Sanitize a string for use in MLflow metric names."""
-    return name.replace(" ", "_").replace("/", "_")
-
-
-def write_test_results_json(
-    results: list[ResumeEvalResult],
-    batch_metrics,
-    skip_rerank: bool,
-) -> None:
-    """Write test evaluation results to JSON and log to MLflow."""
-    # Miss analysis
-    total_positives = sum(r["num_positives"] for r in results)
-    hits = sum(
-        sum(1 for p in r["positives"] if p["miss_type"] == "hit") for r in results
-    )
-    embedding_misses = sum(
-        sum(1 for p in r["positives"] if p["miss_type"] == "embedding_miss")
-        for r in results
-    )
-    reranker_misses = sum(
-        sum(1 for p in r["positives"] if p["miss_type"] == "reranker_miss")
-        for r in results
-    )
-
-    # Miss rates by seniority and domain
-    miss_by_seniority = {}
-    miss_by_domain = {}
-
-    for result in results:
-        for positive in result["positives"]:
-            seniority = positive["positive_seniority"]
-            domain = positive["positive_domain"]
-
-            if seniority not in miss_by_seniority:
-                miss_by_seniority[seniority] = {"total": 0, "misses": 0}
-            if domain not in miss_by_domain:
-                miss_by_domain[domain] = {"total": 0, "misses": 0}
-
-            miss_by_seniority[seniority]["total"] += 1
-            miss_by_domain[domain]["total"] += 1
-
-            if positive["miss_type"] != "hit":
-                miss_by_seniority[seniority]["misses"] += 1
-                miss_by_domain[domain]["misses"] += 1
-
-    miss_rate_by_seniority = {
-        s: c["misses"] / c["total"] if c["total"] > 0 else 0.0
-        for s, c in miss_by_seniority.items()
-    }
-    miss_rate_by_domain = {
-        d: c["misses"] / c["total"] if c["total"] > 0 else 0.0
-        for d, c in miss_by_domain.items()
-    }
-
-    output = {
-        "run_metadata": {
-            "timestamp": datetime.now().isoformat(),
-            "seed": SAMPLE_SEED,
-            "k_precision": K_PRECISION,
-            "k_recall": K_RECALL,
-            "skip_rerank": skip_rerank,
-            "num_resumes": len(results),
-            "num_sampled_test_jobs": TEST_SAMPLE_N,
-        },
-        "aggregate": {
-            "mean_precision_at_5": batch_metrics["mean_precision"][K_PRECISION],
-            "mean_recall_at_10": batch_metrics["mean_recall"][K_RECALL],
-            "num_queries": batch_metrics["num_queries"],
-        },
-        "per_resume": [
-            {
-                "resume_id": r["resume_id"],
-                "seniority": r["seniority"],
-                "domain": r["domain"],
-                "precision_at_5": r["precision_at_5"],
-                "recall_at_10": r["recall_at_10"],
-                "num_positives": r["num_positives"],
-                "positive_statuses": [
-                    {
-                        "positive_id": p["positive_id"],
-                        "title": p["positive_title"],
-                        "embedding_rank": p["embedding_rank"],
-                        "embedding_hit": p["embedding_hit"],
-                        "rerank_rank": p["rerank_rank"],
-                        "reranker_hit": p["reranker_hit"],
-                        "miss_type": p["miss_type"],
-                    }
-                    for p in r["positives"]
-                ],
-            }
-            for r in results
-        ],
-        "miss_analysis": {
-            "total_positives": total_positives,
-            "total_hits": hits,
-            "embedding_misses": embedding_misses,
-            "reranker_misses": reranker_misses,
-            "miss_rate_by_seniority": miss_rate_by_seniority,
-            "miss_rate_by_domain": miss_rate_by_domain,
-        },
-    }
-
-    with open(TEST_RESULTS_JSON, "w") as f:
-        json.dump(output, f, indent=2)
-
-    logger.info(f"Wrote results to {TEST_RESULTS_JSON}")
-
-    # MLflow logging
-    if mlflow.active_run():
-        # Artifacts
-        mlflow.log_artifact(str(TEST_RESULTS_JSON), artifact_path="results")
-
-        # Aggregate metrics
-        mlflow.log_metrics({
-            f"mean_precision_at_{K_PRECISION}": batch_metrics["mean_precision"][K_PRECISION],
-            f"mean_recall_at_{K_RECALL}": batch_metrics["mean_recall"][K_RECALL],
-            "num_queries": float(batch_metrics["num_queries"]),
-            "total_positives":     float(total_positives),
-            "total_hits":          float(hits),
-            "embedding_misses":    float(embedding_misses),
-            "reranker_misses":     float(reranker_misses),
-            "embedding_miss_rate": embedding_misses / total_positives if total_positives else 0.0,
-            "reranker_miss_rate":  reranker_misses / total_positives if total_positives else 0.0,
-        })
-
-        # Per-domain and per-seniority miss rates
-        for domain, rate in miss_rate_by_domain.items():
-            mlflow.log_metric(f"miss_rate_domain_{_sanitize_metric_name(domain)}", rate)
-        for seniority, rate in miss_rate_by_seniority.items():
-            mlflow.log_metric(f"miss_rate_seniority_{_sanitize_metric_name(seniority)}", rate)
-
-        # Distributional summary of per-resume metrics
-        precisions = [r["precision_at_5"] for r in results]
-        recalls    = [r["recall_at_10"]   for r in results]
-        mlflow.log_metrics({
-            "min_precision":         float(min(precisions)),
-            "max_precision":         float(max(precisions)),
-            "std_precision":         float(np.std(precisions)),
-            "min_recall":            float(min(recalls)),
-            "max_recall":            float(max(recalls)),
-            "std_recall":            float(np.std(recalls)),
-            "pct_perfect_precision": sum(p == 1.0 for p in precisions) / len(precisions),
-        })
-
-        # Per-resume table
-        cols = ["resume_id", "seniority", "domain",
-                f"precision_at_{K_PRECISION}",
-                f"recall_at_{K_RECALL}", "num_positives"]
-        rows = [
-            [r["resume_id"], r["seniority"], r["domain"],
-             r["precision_at_5"], r["recall_at_10"], r["num_positives"]]
-            for r in results
-        ]
-        mlflow.log_table(data={"columns": cols, "data": rows},
-                         artifact_file="results/per_resume_metrics.json")
-
-
-def write_test_missed_positives_csv(
-    results: list[ResumeEvalResult], positives_df: pd.DataFrame
-) -> None:
-    """Write missed positives to CSV for analysis and log to MLflow."""
-    rows = []
-
-    for result in results:
-        for positive in result["positives"]:
-            if positive["miss_type"] == "hit":
-                continue
-
-            # Look up full positive record from positives_df
-            pos_record = positives_df[positives_df["id"] == positive["positive_id"]]
-            if pos_record.empty:
-                continue
-
-            pos_row = pos_record.iloc[0]
-
-            rows.append(
-                {
-                    "positive_id": positive["positive_id"],
-                    "resume_id": result["resume_id"],
-                    "resume_seniority": result["seniority"],
-                    "resume_domain": result["domain"],
-                    "positive_title": positive["positive_title"],
-                    "positive_seniority": positive["positive_seniority"],
-                    "positive_domain": positive["positive_domain"],
-                    "primary_skills": "; ".join(positive["primary_skills"]),
-                    "secondary_skills": pos_row["secondary_skills"],
-                    "responsibilities": pos_row["responsibilities"],
-                    "miss_type": positive["miss_type"],
-                    "embedding_rank": positive["embedding_rank"],
-                    "rerank_rank": positive["rerank_rank"],
-                    "seniority_gap": positive["seniority_gap"],
-                    "domain_gap": positive["domain_gap"],
-                    "job_description": pos_row["job_description"],
-                }
-            )
-
-    missed_df = pd.DataFrame(rows)
-    missed_df.to_csv(TEST_MISSED_CSV, index=False)
-    logger.info(f"Wrote {len(missed_df)} missed positives to {TEST_MISSED_CSV}")
-
-    # MLflow logging
-    if mlflow.active_run():
-        mlflow.log_artifact(str(TEST_MISSED_CSV), artifact_path="results")
-        mlflow.log_metric("num_missed_positives", float(len(missed_df)))
 
 
 def main() -> None:
     """Main orchestration function."""
-    setup_logging()
     args = parse_args()
+    setup_logging(args.log_level)
 
     logger.info("=" * 80)
     logger.info("Resume-Job Matching: Test Set Evaluation")
@@ -575,7 +377,7 @@ def main() -> None:
             logger.info("Loading test data")
             resumes_df = pd.read_csv(TEST_RESUMES_PATH)
             positives_df = pd.read_csv(TEST_POSITIVES_PATH)
-            logger.info(f"Loaded {len(resumes_df)} resumes and {len(positives_df)} positives")
+            logger.info("Loaded %d resumes and %d positives", len(resumes_df), len(positives_df))
 
             # Sample jobs (returns both tune and test; we take the test set)
             _, test_jobs_df = sample_jobs(
@@ -667,7 +469,7 @@ def main() -> None:
                 if result:
                     all_results.append(result)
 
-            logger.info(f"Successfully evaluated {len(all_results)}/{len(resumes_df)} resumes")
+            logger.info("Successfully evaluated %d/%d resumes", len(all_results), len(resumes_df))
 
             # Compute aggregate metrics
             logger.info("Computing aggregate metrics")
@@ -685,20 +487,20 @@ def main() -> None:
                 k_values=[K_PRECISION, K_RECALL],
             )
 
-            # Write results
-            write_test_results_json(all_results, batch_metrics, skip_rerank)
-            write_test_missed_positives_csv(all_results, positives_df)
+            # Write results (using reporting module with test paths)
+            write_results_json(all_results, batch_metrics, skip_rerank, output_path=TEST_RESULTS_JSON)
+            write_missed_positives_csv(all_results, positives_df, output_path=TEST_MISSED_CSV)
 
             logger.info("=" * 80)
-            logger.info(f"Mean Precision@{K_PRECISION}: {batch_metrics['mean_precision'][K_PRECISION]:.3f}")
-            logger.info(f"Mean Recall@{K_RECALL}: {batch_metrics['mean_recall'][K_RECALL]:.3f}")
+            logger.info("Mean Precision@%d: %.3f", K_PRECISION, batch_metrics['mean_precision'][K_PRECISION])
+            logger.info("Mean Recall@%d: %.3f", K_RECALL, batch_metrics['mean_recall'][K_RECALL])
             logger.info("=" * 80)
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             sys.exit(1)
         except Exception as e:
-            logger.error(f"Fatal error: {e}", exc_info=True)
+            logger.error("Fatal error: %s", e, exc_info=True)
             sys.exit(1)
 
 

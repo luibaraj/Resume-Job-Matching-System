@@ -155,11 +155,14 @@ class TestSampleJobs:
         # Mock CSV files don't exist
         mock_exists.side_effect = lambda: False
 
-        # Mock database query results
+        # Mock database connection with context manager support
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.fetchall.return_value = [(i,) for i in range(1, 101)]
+        # Support context manager (with statement)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
         mock_connect.return_value = mock_conn
 
         # Mock _fetch_jobs_by_id

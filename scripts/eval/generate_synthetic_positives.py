@@ -14,6 +14,7 @@ with target_count=5, and writes all collected job skeletons to a CSV file with:
 Output: data/eval/synthetic_job_descriptions.csv
 """
 
+import argparse
 import csv
 import logging
 import re
@@ -30,10 +31,6 @@ from eval.positive_gen.positives_pipeline import run_pipeline
 from eval.positive_gen.positives_validate import ResumeInfo
 from regex_extraction import extract_user_years_experience
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -139,20 +136,36 @@ def main():
     """
     Main entry point: iterate resumes, run pipeline, write CSV.
     """
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Generate synthetic positive jobs")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    args = parser.parse_args()
+
+    # Configure logging (after argparse)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="[%(asctime)s] %(levelname)s: %(message)s",
+    )
+
     project_root = Path(__file__).resolve().parent.parent.parent
     input_csv = project_root / "data" / "eval" / "synthetic_resume.csv"
     output_csv = project_root / "data" / "eval" / "synthetic_job_descriptions.csv"
 
     # Verify input exists
     if not input_csv.exists():
-        logger.error(f"Input file not found: {input_csv}")
+        logger.error("Input file not found: %s", input_csv)
         sys.exit(1)
 
     # Ensure output directory exists
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Reading resumes from: {input_csv}")
-    logger.info(f"Writing output to: {output_csv}")
+    logger.info("Reading resumes from: %s", input_csv)
+    logger.info("Writing output to: %s", output_csv)
 
     all_rows = []
     total_collected = 0
@@ -162,7 +175,7 @@ def main():
         reader = csv.DictReader(f)
         resumes = list(reader)
 
-    logger.info(f"Loaded {len(resumes)} resumes. Starting pipeline...")
+    logger.info("Loaded %d resumes. Starting pipeline...", len(resumes))
 
     for idx, row in enumerate(resumes, 1):
         resume_id = row["id"]
@@ -171,8 +184,12 @@ def main():
         resume_domain = row["domain"].strip()
 
         logger.info(
-            f"[{idx}/{len(resumes)}] Processing resume_id={resume_id}, "
-            f"seniority={resume_seniority}, domain={resume_domain}"
+            "[%d/%d] Processing resume_id=%s, seniority=%s, domain=%s",
+            idx,
+            len(resumes),
+            resume_id,
+            resume_seniority,
+            resume_domain,
         )
 
         # Build ResumeInfo for the pipeline
@@ -188,7 +205,11 @@ def main():
             )
         except Exception as e:
             logger.error(
-                f"[{idx}/{len(resumes)}] Pipeline failed for resume_id={resume_id}: {e}"
+                "[%d/%d] Pipeline failed for resume_id=%s: %s",
+                idx,
+                len(resumes),
+                resume_id,
+                e,
             )
             continue
 
@@ -213,12 +234,15 @@ def main():
             total_collected += 1
 
         logger.info(
-            f"[{idx}/{len(resumes)}] → Collected {len(jobs)} jobs. "
-            f"Total so far: {total_collected}"
+            "[%d/%d] Collected %d jobs. Total so far: %d",
+            idx,
+            len(resumes),
+            len(jobs),
+            total_collected,
         )
 
     # Write CSV
-    logger.info(f"Writing {total_collected} jobs to {output_csv}...")
+    logger.info("Writing %d jobs to %s...", total_collected, output_csv)
     if all_rows:
         fieldnames = [
             "id",
@@ -239,13 +263,14 @@ def main():
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_rows)
-        logger.info(f"✓ Wrote {len(all_rows)} rows to {output_csv}")
+        logger.info("Wrote %d rows to %s", len(all_rows), output_csv)
     else:
         logger.warning("No jobs collected. CSV will be empty.")
 
     logger.info(
-        f"Pipeline complete. Total collected: {total_collected}, "
-        f"total discarded: {total_discarded}"
+        "Pipeline complete. Total collected: %d, total discarded: %d",
+        total_collected,
+        total_discarded,
     )
 
 

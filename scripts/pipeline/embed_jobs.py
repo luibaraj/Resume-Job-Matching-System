@@ -12,14 +12,9 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import DB_DEFAULT_PATH, VOYAGE_BATCH_SIZE
+from src.config import DB_DEFAULT_PATH, VOYAGE_BATCH_SIZE, DB_CHUNK_SIZE
 from src.db_utils import add_column_if_missing
 from src.embedding import create_client, embed_batch, serialize_embedding
-
-# DB_CHUNK_SIZE: rows fetched from SQLite per outer loop iteration.
-# Power-of-two alignment (512) improves memory efficiency and aligns with
-# typical batch processing patterns across embedding and preprocessing.
-DB_CHUNK_SIZE = 512
 
 logger = logging.getLogger(__name__)
 

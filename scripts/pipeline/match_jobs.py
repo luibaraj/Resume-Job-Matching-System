@@ -12,10 +12,12 @@ import os
 import sqlite3
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import chromadb
 import numpy as np
+from chromadb.api import ClientAPI
 from dotenv import load_dotenv
 
 # Ensure src/ can be imported from any working directory
@@ -28,7 +30,6 @@ from config import (
     CHROMA_DEFAULT_DIR,
     CORPUS_LIMITATION_MESSAGE,
     DB_DEFAULT_PATH,
-    EMBEDDING_DIM,
     HNSW_EF,
     HNSW_EF_CONSTRUCTION,
     OLLAMA_MODEL,
@@ -176,7 +177,7 @@ def load_or_embed_resume(
 
 def build_chroma_client(
     chroma_dir: str, rebuild: bool
-) -> chromadb.PersistentClient:
+) -> ClientAPI:
     """
     Create a persistent Chroma client, optionally clearing the collection first.
 
@@ -203,7 +204,7 @@ def build_chroma_client(
     return chroma_client
 
 
-def write_results_markdown(results: list[dict], output_path: str = "matched_jobs.md") -> None:
+def write_results_markdown(results: list[dict] | list, output_path: str = "matched_jobs.md") -> None:
     """
     Write results to a Markdown file.
 
@@ -246,8 +247,9 @@ def write_results_markdown(results: list[dict], output_path: str = "matched_jobs
 
 def run_generation_for_results(
     resume_text: str,
-    results: list[dict],
+    results: list[dict] | list,
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> None:
     """
     Run generation pipeline on each reranked result and attach explanation in-place.
@@ -255,6 +257,12 @@ def run_generation_for_results(
     Processes one pair at a time to preserve index alignment. Attaches the
     explanation string to each result dict under "explanation", or None if
     no grounded match was found. Exits early if Ollama is unreachable.
+
+    Args:
+        resume_text: User's resume text.
+        results: List of job results to explain.
+        model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
     """
     logger.info("Running generation pipeline for %d results...", len(results))
 
@@ -268,6 +276,7 @@ def run_generation_for_results(
             generation_output = run_generation_pipeline(
                 pairs=[(resume_text, description)],
                 model=model,
+                run_id=run_id,
             )
         except ollama.RequestError as e:
             logger.warning("Ollama is not reachable: %s. Skipping generation.", e)
@@ -346,6 +355,18 @@ def main() -> None:
         logger.error("COHERE_API_KEY environment variable is not set.")
         sys.exit(1)
 
+    # Pre-flight check: ensure Ollama is reachable
+    try:
+        ollama.list()
+        logger.info("Ollama is reachable.")
+    except (ollama.RequestError, ollama.ResponseError) as e:
+        logger.error("Ollama is not reachable: %s. Please start Ollama before running.", e)
+        sys.exit(1)
+
+    # Generate run_id for request tracing across all pipeline stages
+    run_id = str(uuid.uuid4())
+    logger.info("Pipeline run_id: %s", run_id)
+
     # Resolve database path: arg → env var → default
     db_path = args.db_path or os.getenv("DB_PATH", DB_DEFAULT_PATH)
 
@@ -406,7 +427,7 @@ def main() -> None:
             logger.info("Querying for top %d candidates...", RETRIEVE_TOP_K)
             start_query = time.monotonic()
             candidates = query_collection(
-                collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF, where=query_filter
+                collection, query_embedding, top_k=RETRIEVE_TOP_K, ef=HNSW_EF, where=query_filter, run_id=run_id
             )
             elapsed_query = time.monotonic() - start_query
             logger.info("Queried %d candidates in %.2fs.", len(candidates), elapsed_query)
@@ -415,7 +436,7 @@ def main() -> None:
             logger.info("Reranking %d candidates to top %d...", len(candidates), RERANK_TOP_N)
             start_rerank = time.monotonic()
             results = rerank_jobs(
-                resume_text, candidates, top_n=RERANK_TOP_N, api_key=cohere_api_key
+                resume_text, candidates, top_n=RERANK_TOP_N, api_key=cohere_api_key, run_id=run_id
             )
             elapsed_rerank = time.monotonic() - start_rerank
             logger.info("Reranked to %d results in %.2fs.", len(results), elapsed_rerank)
@@ -427,7 +448,7 @@ def main() -> None:
                 # Step 3: Time generation — attach fit explanations
                 logger.info("Running generation pipeline...")
                 start_gen = time.monotonic()
-                run_generation_for_results(resume_text, results)
+                run_generation_for_results(resume_text, results, run_id=run_id)
                 elapsed_gen = time.monotonic() - start_gen
                 logger.info("Generation completed in %.2fs.", elapsed_gen)
                 write_results_markdown(results, args.output_path)

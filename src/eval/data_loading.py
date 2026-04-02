@@ -68,6 +68,8 @@ def sample_jobs(
     """
     Sample tune and test jobs from jobs.db, caching to CSV if needed.
 
+    Raises ValueError if available jobs are below requested sizes.
+
     Returns:
         (tune_jobs_df, test_jobs_df) with columns: job_id, cleaned_description
     """
@@ -81,20 +83,23 @@ def sample_jobs(
         return tune_df, test_df
 
     logger.info("Sampling jobs from jobs.db")
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id FROM jobs WHERE embedded=1 AND embedding IS NOT NULL ORDER BY id"
-    )
-    all_job_ids = [row[0] for row in cursor.fetchall()]
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM jobs WHERE embedded=1 AND embedding IS NOT NULL ORDER BY id"
+        )
+        all_job_ids = [row[0] for row in cursor.fetchall()]
 
     if len(all_job_ids) < tune_n + test_n:
         logger.warning(
-            f"Only {len(all_job_ids)} embedded jobs available; need {tune_n + test_n}"
+            "Only %d embedded jobs available; need %d. Cannot proceed.",
+            len(all_job_ids),
+            tune_n + test_n,
         )
-        tune_n = min(tune_n, len(all_job_ids) // 2)
-        test_n = len(all_job_ids) - tune_n
+        raise ValueError(
+            "Insufficient embedded jobs: have %d, need %d"
+            % (len(all_job_ids), tune_n + test_n)
+        )
 
     rng = np.random.default_rng(seed)
     sampled_indices = rng.choice(len(all_job_ids), size=tune_n + test_n, replace=False)
@@ -102,18 +107,17 @@ def sample_jobs(
     tune_ids = sampled_ids[:tune_n]
     test_ids = sampled_ids[tune_n:]
 
-    # Fetch descriptions
-    conn = sqlite3.connect(db_path)
-    tune_df = _fetch_jobs_by_id(conn, tune_ids)
-    test_df = _fetch_jobs_by_id(conn, test_ids)
-    conn.close()
+    # Fetch descriptions with context manager
+    with sqlite3.connect(db_path) as conn:
+        tune_df = _fetch_jobs_by_id(conn, tune_ids)
+        test_df = _fetch_jobs_by_id(conn, test_ids)
 
     # Write CSVs
     tune_path.parent.mkdir(parents=True, exist_ok=True)
     test_path.parent.mkdir(parents=True, exist_ok=True)
     tune_df.to_csv(tune_path, index=False)
     test_df.to_csv(test_path, index=False)
-    logger.info(f"Sampled {len(tune_df)} tune jobs and {len(test_df)} test jobs")
+    logger.info("Sampled %d tune jobs and %d test jobs", len(tune_df), len(test_df))
 
     return tune_df, test_df
 
@@ -125,23 +129,25 @@ def _fetch_jobs_by_id(conn: sqlite3.Connection, job_ids: list[int]) -> pd.DataFr
         "SELECT id, cleaned_description FROM jobs WHERE id IN ({})",
         job_ids,
     )
-    return pd.DataFrame(rows, columns=["job_id", "cleaned_description"])
+    col_names = ["job_id", "cleaned_description"]
+    return pd.DataFrame(data=rows, columns=col_names)  # type: ignore[arg-type]
 
 
 def load_sampled_job_embeddings(
     db_path: str, job_ids: list[int]
 ) -> dict[int, np.ndarray]:
-    """Load embeddings for sampled jobs from jobs.db BLOB column."""
+    """Load embeddings for sampled jobs from jobs.db BLOB column.
+
+    Uses context manager to ensure connection is properly closed.
+    """
     embeddings = {}
-    conn = sqlite3.connect(db_path)
+    with sqlite3.connect(db_path) as conn:
+        rows = chunked_select(
+            conn,
+            "SELECT id, embedding FROM jobs WHERE id IN ({})",
+            job_ids,
+        )
+        for job_id, blob in rows:
+            embeddings[job_id] = embedding.deserialize_embedding(blob, dim=config.EMBEDDING_DIM)
 
-    rows = chunked_select(
-        conn,
-        "SELECT id, embedding FROM jobs WHERE id IN ({})",
-        job_ids,
-    )
-    for job_id, blob in rows:
-        embeddings[job_id] = embedding.deserialize_embedding(blob, dim=config.EMBEDDING_DIM)
-
-    conn.close()
     return embeddings

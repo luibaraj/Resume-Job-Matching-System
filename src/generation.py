@@ -14,6 +14,7 @@ All output spans are exact text excerpts, validated via substring search.
 
 import logging
 import re
+import time
 from typing import TypedDict
 
 import ollama
@@ -180,18 +181,56 @@ Fit explanation (1-2 sentences):"""
 # ============================================================================
 
 
-def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
-    """Call Ollama chat endpoint and return response content."""
-    response = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={
-            "temperature": GENERATION_TEMPERATURE,
-            "top_p": GENERATION_TOP_P,
-            "num_predict": GENERATION_MAX_TOKENS,
-        },
-    )
-    return response["message"]["content"]
+def _call_ollama(prompt: str, model: str = OLLAMA_MODEL, max_retries: int = 1) -> str:
+    """Call Ollama chat endpoint and return response content.
+
+    Retries once on transient RequestError with exponential backoff.
+    Sets a timeout to prevent indefinite hangs.
+
+    Args:
+        prompt: The prompt to send to Ollama.
+        model: Ollama model name.
+        max_retries: Number of retry attempts on transient errors.
+
+    Returns:
+        Response content string.
+
+    Raises:
+        ollama.RequestError: If the request fails after all retries.
+        ollama.ResponseError: If the model returns an error.
+    """
+    attempt = 0
+    while True:
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": GENERATION_TEMPERATURE,
+                    "top_p": GENERATION_TOP_P,
+                    "num_predict": GENERATION_MAX_TOKENS,
+                },
+            )
+            return response["message"]["content"]
+        except ollama.RequestError as e:
+            attempt += 1
+            if attempt > max_retries:
+                logger.error(
+                    "_call_ollama failed after %d attempts: %s",
+                    max_retries,
+                    e,
+                )
+                raise
+            # Exponential backoff: 0.5s, then 1.0s
+            delay = 0.5 * (2 ** (attempt - 1))
+            logger.warning(
+                "_call_ollama attempt %d/%d failed: %s. Retrying in %.1fs...",
+                attempt,
+                max_retries,
+                e,
+                delay,
+            )
+            time.sleep(delay)
 
 
 # ============================================================================
@@ -202,6 +241,7 @@ def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
 def extract_requirements(
     job_posting: str,
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> list[str]:
     """Extract required skills from job posting via LLM.
 
@@ -211,10 +251,12 @@ def extract_requirements(
     Args:
         job_posting: Job posting text to extract from.
         model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         List of validated exact-text spans from job posting.
     """
+    start_time = time.monotonic()
     prompt = _build_requirements_prompt(job_posting)
     response = _call_ollama(prompt, model)
     candidate_spans = _parse_requirements(response)
@@ -222,7 +264,16 @@ def extract_requirements(
     # Validate each span
     validated = [span for span in candidate_spans if _span_exists_in_text(span, job_posting)]
 
-    logger.debug(f"Extracted {len(candidate_spans)} requirements, validated {len(validated)}")
+    elapsed_time = time.monotonic() - start_time
+    if run_id:
+        logger.info(
+            "extract_requirements (run_id=%s) completed in %.3fs",
+            run_id,
+            elapsed_time,
+        )
+    else:
+        logger.info("extract_requirements completed in %.3fs", elapsed_time)
+    logger.debug("Extracted %d requirements, validated %d", len(candidate_spans), len(validated))
     return validated
 
 
@@ -230,6 +281,7 @@ def find_resume_matches(
     resume: str,
     requirements: list[str],
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> tuple[list[RequirementMatch], int]:
     """Find resume spans matching each requirement.
 
@@ -240,10 +292,12 @@ def find_resume_matches(
         resume: Resume text to search.
         requirements: List of requirement spans to match.
         model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         Tuple of (validated_pairs, hallucination_count).
     """
+    start_time = time.monotonic()
     validated_pairs = []
     hallucination_count = 0
 
@@ -267,21 +321,32 @@ def find_resume_matches(
         else:
             # Hallucination: LLM returned a span that isn't in the resume
             hallucination_count += 1
-            logger.debug(f"Hallucination detected: '{normalized_match}' not in resume")
+            logger.debug("Hallucination detected: '%s' not in resume", normalized_match)
 
-    logger.debug(f"Found {len(validated_pairs)} matches, {hallucination_count} hallucinations")
+    elapsed_time = time.monotonic() - start_time
+    if run_id:
+        logger.info(
+            "find_resume_matches (run_id=%s) completed in %.3fs",
+            run_id,
+            elapsed_time,
+        )
+    else:
+        logger.info("find_resume_matches completed in %.3fs", elapsed_time)
+    logger.debug("Found %d matches, %d hallucinations", len(validated_pairs), hallucination_count)
     return validated_pairs, hallucination_count
 
 
 def filter_pairs(
     pairs: list[tuple[str, str]],
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> tuple[list[tuple[str, str, list[RequirementMatch], int]], str | None]:
     """Process batch and filter out pairs with zero validated matches.
 
     Args:
         pairs: List of (resume, job_posting) tuples.
         model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         Tuple of (retained_pairs, corpus_message).
@@ -293,40 +358,55 @@ def filter_pairs(
 
     for resume, job_posting in pairs:
         # Extract requirements from job posting
-        requirements = extract_requirements(job_posting, model)
+        requirements = extract_requirements(job_posting, model, run_id=run_id)
 
         # Find resume matches
-        validated_pairs, hallucination_count = find_resume_matches(resume, requirements, model)
+        validated_pairs, hallucination_count = find_resume_matches(resume, requirements, model, run_id=run_id)
 
         # Keep only if we have at least one validated match
-        if len(validated_pairs) > 0:
+        if validated_pairs:
             retained.append((resume, job_posting, validated_pairs, hallucination_count))
 
     # Check if all pairs were scrapped
-    if len(retained) == 0:
+    if not retained:
         logger.warning("All pairs scrapped — corpus limitation detected")
         return [], CORPUS_LIMITATION_MESSAGE
 
-    logger.debug(f"Retained {len(retained)} out of {len(pairs)} pairs")
+    logger.debug("Retained %d out of %d pairs", len(retained), len(pairs))
     return retained, None
 
 
 def generate_explanation(
     validated_pairs: list[RequirementMatch],
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> str:
     """Generate brief fit explanation from validated pairs.
 
     Args:
         validated_pairs: List of (requirement, resume_match) pairs.
         model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         Explanation string (1-2 sentences).
     """
+    start_time = time.monotonic()
     prompt = _build_explanation_prompt(validated_pairs)
     response = _call_ollama(prompt, model)
-    return response.strip()
+    explanation = response.strip()
+
+    elapsed_time = time.monotonic() - start_time
+    if run_id:
+        logger.info(
+            "generate_explanation (run_id=%s) completed in %.3fs",
+            run_id,
+            elapsed_time,
+        )
+    else:
+        logger.info("generate_explanation completed in %.3fs", elapsed_time)
+
+    return explanation
 
 
 def log_result(result: PairResult) -> None:
@@ -336,19 +416,22 @@ def log_result(result: PairResult) -> None:
         result: PairResult to log.
     """
     logger.info(
-        f"Explanation: {result['explanation']} | "
-        f"Validated pairs: {result['num_validated_pairs']} | "
-        f"Hallucinations: {result['hallucination_count']}"
+        "Explanation: %s | Validated pairs: %d | Hallucinations: %d",
+        result['explanation'],
+        result['num_validated_pairs'],
+        result['hallucination_count'],
     )
     if result["flagged_for_review"]:
         logger.warning(
-            f"Pair flagged for manual review due to {result['hallucination_count']} hallucination(s)"
+            "Pair flagged for manual review due to %d hallucination(s)",
+            result['hallucination_count'],
         )
 
 
 def run_generation_pipeline(
     pairs: list[tuple[str, str]],
     model: str = OLLAMA_MODEL,
+    run_id: str | None = None,
 ) -> list[PairResult] | str:
     """Run full generation pipeline on a batch of (resume, job_posting) pairs.
 
@@ -358,6 +441,7 @@ def run_generation_pipeline(
     Args:
         pairs: List of (resume, job_posting) tuples (max 10).
         model: Ollama model name.
+        run_id: Optional trace ID for request tracing.
 
     Returns:
         List of PairResult dicts, or CORPUS_LIMITATION_MESSAGE string if all filtered.
@@ -369,7 +453,7 @@ def run_generation_pipeline(
         raise ValueError(f"Batch size {len(pairs)} exceeds max {MAX_BATCH_SIZE}")
 
     # Filter pairs
-    retained, corpus_message = filter_pairs(pairs, model)
+    retained, corpus_message = filter_pairs(pairs, model, run_id=run_id)
 
     # If all filtered, return corpus message
     if corpus_message is not None:
@@ -377,8 +461,8 @@ def run_generation_pipeline(
 
     # Generate explanations and build results
     results = []
-    for resume, job_posting, validated_pairs, hallucination_count in retained:
-        explanation = generate_explanation(validated_pairs, model)
+    for _, _, validated_pairs, hallucination_count in retained:
+        explanation = generate_explanation(validated_pairs, model, run_id=run_id)
         result: PairResult = {
             "explanation": explanation,
             "validated_pairs": validated_pairs,

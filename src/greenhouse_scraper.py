@@ -6,11 +6,9 @@ Handles rate limiting, pagination, and data transformation.
 """
 
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
-from urllib.parse import urljoin
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -114,7 +112,7 @@ class GreenhouseScraper:
         """
         jobs = []
 
-        logger.info(f"Starting Greenhouse scrape for board: {self.board_token}")
+        logger.info("Starting Greenhouse scrape for board: %s", self.board_token)
 
         try:
             url = self.BASE_URL.format(board_token=self.board_token)
@@ -133,13 +131,13 @@ class GreenhouseScraper:
                 if job:
                     jobs.append(job)
 
-            logger.debug(f"Fetched {len(batch)} jobs from API, kept {len(jobs)} after filtering")
+            logger.debug("Fetched %d jobs from API, kept %d after filtering", len(batch), len(jobs))
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching jobs from Greenhouse: {e}")
+            logger.error("Error fetching jobs from Greenhouse: %s", e)
             raise
 
-        logger.info(f"Successfully scraped {len(jobs)} jobs from Greenhouse")
+        logger.info("Successfully scraped %d jobs from Greenhouse", len(jobs))
         return jobs
 
     def _parse_job(
@@ -195,7 +193,7 @@ class GreenhouseScraper:
             internal_job_id = job_data.get('internal_job_id', 0)
 
             if not job_id or not title:
-                logger.warning(f"Skipping job with missing required fields: {job_data}")
+                logger.warning("Skipping job with missing required fields: %s", job_data)
                 return None
 
             # Extract location
@@ -204,7 +202,7 @@ class GreenhouseScraper:
             # Extract description
             description = job_data.get('content', '').strip()
             if not description:
-                logger.warning(f"Job {job_id} missing content/description")
+                logger.warning("Job %s missing content/description", job_id)
                 return None
 
             # Extract optional fields
@@ -233,7 +231,7 @@ class GreenhouseScraper:
             )
 
         except Exception as e:
-            logger.error(f"Error parsing job {job_data.get('id', 'unknown')}: {e}")
+            logger.error("Error parsing job %s: %s", job_data.get('id', 'unknown'), e)
             return None
 
     def _extract_location(self, job_data: Dict[str, Any]) -> str:
@@ -293,7 +291,7 @@ class GreenhouseJobBoardDiscovery:
                 if len(parts) >= 2:
                     return parts[0].replace('https://', '').replace('http://', '')
         except Exception as e:
-            logger.warning(f"Could not extract board token from {url}: {e}")
+            logger.warning("Could not extract board token from %s: %s", url, e)
 
         return None
 

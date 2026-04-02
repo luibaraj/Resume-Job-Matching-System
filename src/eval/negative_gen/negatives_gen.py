@@ -8,6 +8,8 @@ are generated using the same approach as the positives pipeline to ensure
 structural consistency and reduce validation failures.
 """
 
+from __future__ import annotations
+
 import random
 import sys
 from pathlib import Path
@@ -54,15 +56,17 @@ _YEARS_FOR_SENIORITY = {
     "Staff": "7-10",
 }
 
-def get_target_seniority(resume_seniority: str) -> str:
+def get_target_seniority(resume_seniority: str, rng: random.Random | None = None) -> str:
     """
     Return a mismatched target seniority level for the given resume seniority.
 
-    Uses random.choice for levels with multiple valid targets.
+    Uses random.choice (or seeded RNG) for levels with multiple valid targets.
 
     Args:
         resume_seniority: Canonical seniority string from the resume
                          ("Junior", "Mid", "Senior", or "Staff").
+        rng: Optional seeded random.Random instance for reproducible selection.
+             If None, uses the global random module (default unseeded behavior).
 
     Returns:
         A seniority string that is mismatched with the resume level.
@@ -76,7 +80,9 @@ def get_target_seniority(resume_seniority: str) -> str:
             f"Must be one of {SENIORITY_ORDER}."
         )
     targets = _MISMATCH_TARGETS[resume_seniority]
-    return random.choice(targets)
+    # Use provided RNG if available; otherwise use global random module
+    chooser = rng.choice if rng is not None else random.choice
+    return chooser(targets)
 
 
 def _build_responsibility_mismatch_prompt(
@@ -125,7 +131,7 @@ def generate_mismatched_skeleton(
     - "responsibility": job responsibilities describe a different sub-role; seniority/domain match
 
     Args:
-        resume_info: Resume information dict (ResumeInfo TypedDict).
+        resume_info: Resume information dict with keys: resume_text, seniority, domain.
         model: Ollama model name.
         mismatch_type: Type of mismatch to generate ("seniority", "responsibility").
 
@@ -146,7 +152,9 @@ def generate_mismatched_skeleton(
 
     if mismatch_type == "seniority":
         # Seniority mismatch: deterministic fields from target seniority
-        target_seniority = get_target_seniority(resume_seniority)
+        # Use seeded RNG for reproducible seniority selection
+        rng = random.Random(42)
+        target_seniority = get_target_seniority(resume_seniority, rng=rng)
 
         # Extract years experience and generate deterministic fields
         years_experience = _extract_years_experience(resume_text, model)
@@ -157,9 +165,9 @@ def generate_mismatched_skeleton(
         det["years_required"] = _YEARS_FOR_SENIORITY[target_seniority]
 
         # Generate skills from the deterministic target seniority
-        target_resume_info = resume_info.copy()
+        target_resume_info = resume_info.copy()  # type: ignore[union-attr]
         target_resume_info["seniority"] = target_seniority
-        primary_skills, secondary_skills = _generate_skills(target_resume_info, model)
+        primary_skills, secondary_skills = _generate_skills(target_resume_info, model)  # type: ignore[arg-type]
 
         # Generate responsibilities using standard responsibility generator
         responsibilities: list[str] = []
@@ -170,7 +178,7 @@ def generate_mismatched_skeleton(
             attempts += 1
             try:
                 resp = _generate_single_responsibility(
-                    target_resume_info, primary_skills, model, responsibilities
+                    target_resume_info, primary_skills, model, responsibilities  # type: ignore[arg-type]
                 )
                 responsibilities.append(resp)
             except ValueError:
@@ -196,7 +204,7 @@ def generate_mismatched_skeleton(
         det = _generate_deterministic_fields(resume_seniority, resume_domain, years_experience)
 
         # Generate skills normally
-        primary_skills, secondary_skills = _generate_skills(resume_info, model)
+        primary_skills, secondary_skills = _generate_skills(resume_info, model)  # type: ignore[arg-type]
 
         # Generate responsibilities that describe a different sub-role
         responsibilities: list[str] = []

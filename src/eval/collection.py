@@ -47,7 +47,7 @@ def get_or_build_tune_collection(
     hash_p = Path(hash_path)
 
     # Compute hash of job_id column
-    sorted_ids = np.sort(tune_jobs_df["job_id"].values)
+    sorted_ids = np.sort(tune_jobs_df["job_id"].values)  # type: ignore[arg-type]
     current_hash = data_loading.compute_hash("|".join(map(str, sorted_ids)).encode("utf-8"))
 
     # Check if collection exists and hash matches
@@ -129,7 +129,7 @@ def get_or_build_tune_collection(
         metadatas=metadatas_to_upsert,
     )
 
-    logger.info(f"Upserted {len(ids_to_upsert)} jobs to tune eval collection")
+    logger.info("Upserted %d jobs to tune eval collection", len(ids_to_upsert))
 
     # Write hash
     hash_p.parent.mkdir(parents=True, exist_ok=True)
@@ -169,14 +169,14 @@ def swap_positives(
     for _, row in current_positives.iterrows():
         pos_id = row["id"]
         if pos_id not in positive_embeddings:
-            logger.warning(f"No embedding for positive {pos_id}; skipping")
+            logger.warning("No embedding for positive %s; skipping", pos_id)
             continue
 
         ids_to_upsert.append(f"pos_{pos_id}")
         embeddings_to_upsert.append(positive_embeddings[pos_id].tolist())
         metadatas_to_upsert.append(
             {
-                "title": str(row["title"]) if row["title"] else "",
+                "title": str(row["title"]) if row["title"] else "",  # type: ignore[arg-type]
                 "location": "",
                 "source_url": "",
                 "board_token": "",
@@ -184,7 +184,7 @@ def swap_positives(
                 "required_degree": regex_extraction.extract_degree_requirement(str(row["job_description"])),
                 "seniority_level": (
                     regex_extraction.extract_seniority_level(str(row["job_description"]))
-                    or regex_extraction.extract_seniority_from_title(str(row["title"]) if row["title"] else "")
+                    or regex_extraction.extract_seniority_from_title(str(row["title"]) if row["title"] else "")  # type: ignore[arg-type]
                 ),
                 "min_years_experience": regex_extraction.extract_years_experience(str(row["job_description"])),
             }

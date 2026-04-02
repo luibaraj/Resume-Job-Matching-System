@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import logging
 import os
+import random
 import sqlite3
 import sys
 import time
@@ -82,6 +83,8 @@ def scrape_board_safe(token: str) -> tuple[str, list[GreenhouseJob] | Exception]
             if attempt < _SCRAPE_MAX_RETRIES:
                 # Exponential backoff: 2.0s, 4.0s, 8.0s
                 delay = _SCRAPE_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                # Add jitter: ±10% of delay
+                delay += random.uniform(0, delay * 0.1)
                 logger.warning(
                     "[%s] Transient error (attempt %d/%d): %s. Retrying in %.1fs...",
                     token,

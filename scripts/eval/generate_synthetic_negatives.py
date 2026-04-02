@@ -20,6 +20,7 @@ structural consistency. Results are written to a CSV file with:
 Output: data/eval/synthetic_negative_job_descriptions.csv
 """
 
+import argparse
 import csv
 import logging
 import sys
@@ -49,10 +50,6 @@ from generate_synthetic_positives import (
     format_job_for_embedding,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -150,10 +147,12 @@ def run_negatives_for_resume(
         # Step 3: Repair
         failed_check = validation["failed_check"] or "structural"
         logger.warning(
-            f"[{mismatch_type}] Validation FAILED at '{failed_check}': "
-            f"{validation['reason']}"
+            "[%s] Validation FAILED at '%s': %s",
+            mismatch_type,
+            failed_check,
+            validation['reason'],
         )
-        logger.info(f"[{mismatch_type}] Attempting repair...")
+        logger.info("[%s] Attempting repair...", mismatch_type)
 
         try:
             repair_result = repair_mismatched_skeleton(
@@ -167,7 +166,9 @@ def run_negatives_for_resume(
             )
         except (ollama.RequestError, ollama.ResponseError) as e:
             logger.error(
-                f"[{mismatch_type}] Ollama error during repair: {e}"
+                "[%s] Ollama error during repair: %s",
+                mismatch_type,
+                e,
             )
             discard_count += 1
             continue
@@ -175,21 +176,27 @@ def run_negatives_for_resume(
         if repair_result["success"] and repair_result["job"] is not None:
             collected.append(repair_result["job"])
             logger.info(
-                f"[{mismatch_type}] Repair SUCCEEDED "
-                f"({repair_result['attempts']} attempt(s)) — "
-                f"collected {len(collected)}/{target_count}"
+                "[%s] Repair SUCCEEDED (%d attempt(s)) — collected %d/%d",
+                mismatch_type,
+                repair_result['attempts'],
+                len(collected),
+                target_count,
             )
         else:
             discard_count += 1
             logger.warning(
-                f"[{mismatch_type}] Repair FAILED after "
-                f"{repair_result['attempts']} attempt(s) — discarding. "
-                f"Reason: {repair_result['discard_reason']}"
+                "[%s] Repair FAILED after %d attempt(s) — discarding. Reason: %s",
+                mismatch_type,
+                repair_result['attempts'],
+                repair_result['discard_reason'],
             )
 
     logger.info(
-        f"[{mismatch_type}] Done. collected={len(collected)}, "
-        f"total_attempts={total_attempts}, discards={discard_count}"
+        "[%s] Done. collected=%d, total_attempts=%d, discards=%d",
+        mismatch_type,
+        len(collected),
+        total_attempts,
+        discard_count,
     )
     return collected
 
@@ -198,6 +205,22 @@ def main():
     """
     Main entry point: iterate resumes, run negatives pipeline, write CSV.
     """
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Generate synthetic negative jobs")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    args = parser.parse_args()
+
+    # Configure logging (after argparse)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="[%(asctime)s] %(levelname)s: %(message)s",
+    )
+
     project_root = Path(__file__).resolve().parent.parent.parent
     input_csv = project_root / "data" / "eval" / "synthetic_resume.csv"
     output_csv = (
@@ -206,14 +229,14 @@ def main():
 
     # Verify input exists
     if not input_csv.exists():
-        logger.error(f"Input file not found: {input_csv}")
+        logger.error("Input file not found: %s", input_csv)
         sys.exit(1)
 
     # Ensure output directory exists
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Reading resumes from: {input_csv}")
-    logger.info(f"Writing output to: {output_csv}")
+    logger.info("Reading resumes from: %s", input_csv)
+    logger.info("Writing output to: %s", output_csv)
 
     all_rows = []
     total_collected = 0
@@ -222,7 +245,7 @@ def main():
         reader = csv.DictReader(f)
         resumes = list(reader)
 
-    logger.info(f"Loaded {len(resumes)} resumes. Starting negatives generation...")
+    logger.info("Loaded %d resumes. Starting negatives generation...", len(resumes))
 
     for idx, row in enumerate(resumes, 1):
         resume_id = row["id"]
@@ -231,15 +254,21 @@ def main():
         resume_domain = row["domain"].strip()
 
         logger.info(
-            f"[{idx}/{len(resumes)}] Processing resume_id={resume_id}, "
-            f"seniority={resume_seniority}, domain={resume_domain}"
+            "[%d/%d] Processing resume_id=%s, seniority=%s, domain=%s",
+            idx,
+            len(resumes),
+            resume_id,
+            resume_seniority,
+            resume_domain,
         )
 
         # Skip empty resumes
         if not resume_text.strip():
             logger.warning(
-                f"[{idx}/{len(resumes)}] Empty resume text for "
-                f"resume_id={resume_id}. Skipping."
+                "[%d/%d] Empty resume text for resume_id=%s. Skipping.",
+                idx,
+                len(resumes),
+                resume_id,
             )
             continue
 
@@ -254,8 +283,11 @@ def main():
 
         for mismatch_type, target_count in generation_tasks:
             logger.info(
-                f"[{idx}/{len(resumes)}] Running mismatch_type={mismatch_type}, "
-                f"target={target_count}"
+                "[%d/%d] Running mismatch_type=%s, target=%d",
+                idx,
+                len(resumes),
+                mismatch_type,
+                target_count,
             )
             try:
                 jobs = run_negatives_for_resume(
@@ -265,8 +297,12 @@ def main():
                 )
             except Exception as e:
                 logger.error(
-                    f"[{idx}/{len(resumes)}] Unexpected error for "
-                    f"resume_id={resume_id}, mismatch_type={mismatch_type}: {e}"
+                    "[%d/%d] Unexpected error for resume_id=%s, mismatch_type=%s: %s",
+                    idx,
+                    len(resumes),
+                    resume_id,
+                    mismatch_type,
+                    e,
                 )
                 continue
 
@@ -296,16 +332,23 @@ def main():
                 total_collected += 1
 
             logger.info(
-                f"[{idx}/{len(resumes)}] mismatch_type={mismatch_type} → "
-                f"collected {len(jobs)}/{target_count}"
+                "[%d/%d] mismatch_type=%s collected %d/%d",
+                idx,
+                len(resumes),
+                mismatch_type,
+                len(jobs),
+                target_count,
             )
 
         logger.info(
-            f"[{idx}/{len(resumes)}] Resume done. Total so far: {total_collected}"
+            "[%d/%d] Resume done. Total so far: %d",
+            idx,
+            len(resumes),
+            total_collected,
         )
 
     # Write CSV
-    logger.info(f"Writing {total_collected} jobs to {output_csv}...")
+    logger.info("Writing %d jobs to %s...", total_collected, output_csv)
     if all_rows:
         fieldnames = [
             "id",
@@ -327,11 +370,11 @@ def main():
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_rows)
-        logger.info(f"✓ Wrote {len(all_rows)} rows to {output_csv}")
+        logger.info("Wrote %d rows to %s", len(all_rows), output_csv)
     else:
         logger.warning("No jobs collected. CSV will be empty.")
 
-    logger.info(f"Generation complete. Total collected: {total_collected}")
+    logger.info("Generation complete. Total collected: %d", total_collected)
 
 
 if __name__ == "__main__":

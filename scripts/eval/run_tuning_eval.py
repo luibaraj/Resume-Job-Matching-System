@@ -85,13 +85,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force re-sample jobs even if CSVs exist",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
     return parser.parse_args()
 
 
-def setup_logging() -> None:
+def setup_logging(log_level: str = "INFO") -> None:
     """Configure logging."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, log_level),
         format="[%(asctime)s] %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
@@ -136,7 +142,7 @@ def retrieve_for_resume(
             resume_positives_df["resume_id"] == resume_id
         ]
         if len(resume_positives) == 0:
-            logger.warning(f"No positives for resume {resume_id}")
+            logger.warning("No positives for resume %s", resume_id)
             return None
 
         current_positive_ids = swap_positives(
@@ -152,7 +158,7 @@ def retrieve_for_resume(
         return (retrieved, set(current_positive_ids))
 
     except Exception as e:
-        logger.error(f"Error retrieving for resume {resume_id}: {e}", exc_info=True)
+        logger.error("Error retrieving for resume %s: %s", resume_id, e, exc_info=True)
         return None
 
 
@@ -303,7 +309,7 @@ def score_resume(
         )
 
     except Exception as e:
-        logger.error(f"Error scoring resume {resume_id}: {e}", exc_info=True)
+        logger.error("Error scoring resume %s: %s", resume_id, e, exc_info=True)
         return None
 
 
@@ -311,8 +317,8 @@ def score_resume(
 
 def main() -> None:
     """Main orchestration function."""
-    setup_logging()
     args = parse_args()
+    setup_logging(args.log_level)
 
     logger.info("=" * 80)
     logger.info("Resume-Job Matching: Tune Set Evaluation")
@@ -360,7 +366,7 @@ def main() -> None:
             logger.info("Loading tune data")
             resumes_df = pd.read_csv(TUNE_RESUMES_PATH)
             positives_df = pd.read_csv(TUNE_POSITIVES_PATH)
-            logger.info(f"Loaded {len(resumes_df)} resumes and {len(positives_df)} positives")
+            logger.info("Loaded %d resumes and %d positives", len(resumes_df), len(positives_df))
 
             # Sample jobs
             tune_jobs_df, _ = sample_jobs(
@@ -441,7 +447,7 @@ def main() -> None:
                 if result:
                     all_results.append(result)
 
-            logger.info(f"Successfully evaluated {len(all_results)}/{len(resumes_df)} resumes")
+            logger.info("Successfully evaluated %d/%d resumes", len(all_results), len(resumes_df))
 
             # Compute aggregate metrics
             logger.info("Computing aggregate metrics")
@@ -464,15 +470,15 @@ def main() -> None:
             write_missed_positives_csv(all_results, positives_df)
 
             logger.info("=" * 80)
-            logger.info(f"Mean Precision@{K_PRECISION}: {batch_metrics['mean_precision'][K_PRECISION]:.3f}")
-            logger.info(f"Mean Recall@{K_RECALL}: {batch_metrics['mean_recall'][K_RECALL]:.3f}")
+            logger.info("Mean Precision@%d: %.3f", K_PRECISION, batch_metrics['mean_precision'][K_PRECISION])
+            logger.info("Mean Recall@%d: %.3f", K_RECALL, batch_metrics['mean_recall'][K_RECALL])
             logger.info("=" * 80)
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             sys.exit(1)
         except Exception as e:
-            logger.error(f"Fatal error: {e}", exc_info=True)
+            logger.error("Fatal error: %s", e, exc_info=True)
             sys.exit(1)
 
 

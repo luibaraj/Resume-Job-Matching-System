@@ -30,6 +30,7 @@ def write_results_json(
     results: list[types.ResumeEvalResult],
     batch_metrics: metrics.BatchMetricsAtK,
     skip_rerank: bool,
+    output_path: str | None = None,
 ) -> None:
     """
     Write evaluation results to JSON with miss analysis.
@@ -38,7 +39,10 @@ def write_results_json(
         results: List of per-resume evaluation results
         batch_metrics: Batch metrics dictionary
         skip_rerank: Whether reranking was skipped
+        output_path: Path to write JSON to (default: TUNE_RESULTS_JSON)
     """
+    if output_path is None:
+        output_path = eval_config.TUNE_RESULTS_JSON
     # Miss analysis
     total_positives = sum(r["num_positives"] for r in results)
     hits = sum(
@@ -131,15 +135,15 @@ def write_results_json(
         },
     }
 
-    with open(eval_config.TUNE_RESULTS_JSON, "w") as f:
+    with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    logger.info(f"Wrote results to {eval_config.TUNE_RESULTS_JSON}")
+    logger.info("Wrote results to %s", output_path)
 
     # MLflow logging
     if mlflow.active_run():
         # Artifacts
-        mlflow.log_artifact(str(eval_config.TUNE_RESULTS_JSON), artifact_path="results")
+        mlflow.log_artifact(str(output_path), artifact_path="results")
 
         # Aggregate metrics
         mlflow.log_metrics({
@@ -187,7 +191,9 @@ def write_results_json(
 
 
 def write_missed_positives_csv(
-    results: list[types.ResumeEvalResult], positives_df: pd.DataFrame
+    results: list[types.ResumeEvalResult],
+    positives_df: pd.DataFrame,
+    output_path: str | None = None,
 ) -> None:
     """
     Write missed positives to CSV for analysis.
@@ -195,7 +201,10 @@ def write_missed_positives_csv(
     Args:
         results: List of per-resume evaluation results
         positives_df: DataFrame of all positives (for lookup)
+        output_path: Path to write CSV to (default: TUNE_MISSED_CSV)
     """
+    if output_path is None:
+        output_path = eval_config.TUNE_MISSED_CSV
     rows = []
 
     for result in results:
@@ -232,10 +241,10 @@ def write_missed_positives_csv(
             )
 
     missed_df = pd.DataFrame(rows)
-    missed_df.to_csv(eval_config.TUNE_MISSED_CSV, index=False)
-    logger.info(f"Wrote {len(missed_df)} missed positives to {eval_config.TUNE_MISSED_CSV}")
+    missed_df.to_csv(output_path, index=False)
+    logger.info("Wrote %d missed positives to %s", len(missed_df), output_path)
 
     # MLflow logging
     if mlflow.active_run():
-        mlflow.log_artifact(str(eval_config.TUNE_MISSED_CSV), artifact_path="results")
+        mlflow.log_artifact(str(output_path), artifact_path="results")
         mlflow.log_metric("num_missed_positives", float(len(missed_df)))

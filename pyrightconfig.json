@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.11",
+  "include": ["src"],
+  "exclude": ["venv", "tests", "scripts/eval"],
+  "extraPaths": ["./src"],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportPrivateImportUsage": false,
+  "venvPath": ".",
+  "venv": "venv"
+}

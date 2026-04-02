@@ -15,6 +15,7 @@ EMBED_RETRY_BASE_DELAY: float = 2.0 # Base seconds for exponential back-off
 
 # Database
 DB_DEFAULT_PATH: str = "data/jobs.db"
+DB_CHUNK_SIZE: int = 512  # Batch size for processing large result sets
 
 # Chroma
 CHROMA_COLLECTION_NAME: str = "jobs"

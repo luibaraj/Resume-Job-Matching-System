@@ -15,7 +15,10 @@ with per-responsibility generation and anti-repetition context injection.
 All LLM calls use a locally hosted LLaMA 3.2 3B model via Ollama.
 """
 
+from __future__ import annotations
+
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -147,8 +150,7 @@ def parse_skeleton_response(response: str) -> dict:
         return [skill.strip() for skill in s.split(",") if skill.strip()]
 
     def split_responsibilities(s: str) -> list[str]:
-        import re as _re
-        items = _re.split(r"[;,]", s)
+        items = re.split(r"[;,]", s)
         return [item.strip() for item in items if item.strip()]
 
     return {
@@ -346,7 +348,7 @@ Do not add explanation or extra text."""
 
 
 def _generate_skills(
-    resume_info: dict, model: str = OLLAMA_MODEL
+    resume_info: "ResumeInfo", model: str = OLLAMA_MODEL
 ) -> tuple[list[str], list[str]]:
     """Generate primary and secondary skills via LLM.
 
@@ -428,10 +430,10 @@ Write each responsibility as a distinct, non-repetitive sentence."""
 
 
 def _generate_single_responsibility(
-    resume_info: dict,
+    resume_info: "ResumeInfo",
     primary_skills: list[str],
     model: str = OLLAMA_MODEL,
-    already_generated: list[str] = None,
+    already_generated: list[str] | None = None,
 ) -> str:
     """Generate a single responsibility via LLM.
 
@@ -477,7 +479,7 @@ def _generate_single_responsibility(
 
 
 def generate_job_skeleton(
-    resume_info: dict, model: str = OLLAMA_MODEL
+    resume_info: ResumeInfo, model: str = OLLAMA_MODEL
 ) -> JobSkeleton:
     """
     Generate a job skeleton matching the given resume info.
