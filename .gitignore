@@ -64,3 +64,8 @@ matched_jobs.md
 .aider*
 .Claude
 CONVENTIONS.md
+
+
+# Plans
+
+fastapi_app/deploy.md
