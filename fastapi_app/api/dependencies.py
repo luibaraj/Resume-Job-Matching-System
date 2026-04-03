@@ -3,6 +3,7 @@ import sqlite3
 from functools import lru_cache
 import voyageai
 import chromadb
+import cohere
 from src.embedding import create_client
 
 @lru_cache
@@ -13,6 +14,10 @@ def get_voyage_client():
 def get_chroma_collection():
     client = chromadb.PersistentClient(path=os.environ["CHROMA_DIR"])
     return client.get_collection(os.environ["CHROMA_COLLECTION"])
+
+@lru_cache
+def get_cohere_client():
+    return cohere.Client(os.environ["COHERE_API_KEY"])
 
 def get_db():
     conn = sqlite3.connect(os.environ["DB_PATH"])
