@@ -3,8 +3,12 @@
 import sqlite3
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
+from fastapi_app.app.main import create_app
+from fastapi_app.app.services.matching_service import MatchingService
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -116,3 +120,64 @@ def multiple_job_rows():
             "created_at": "2026-04-01T12:00:00Z",
         },
     ]
+
+
+# FastAPI testing fixtures
+@pytest.fixture
+def mock_matching_service():
+    """MagicMock of MatchingService."""
+    mock = MagicMock(spec=MatchingService)
+    mock.match.return_value = {
+        "matches": [],
+        "total_candidates": 0,
+        "total_reranked": 0,
+        "filters_applied": None,
+        "run_id": "test-run-id"
+    }
+    return mock
+
+@pytest.fixture
+def fastapi_test_client(mock_matching_service):
+    """FastAPI TestClient with overridden dependencies."""
+    from fastapi_app.app.dependencies import get_matching_service
+    
+    def override_get_matching_service():
+        yield mock_matching_service
+    
+    app = create_app()
+    app.dependency_overrides[get_matching_service] = override_get_matching_service
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+@pytest.fixture
+def sample_resume_text():
+    """Short resume string."""
+    return "Senior Software Engineer with 5+ years experience in Python, Django, and AWS. BS in Computer Science."
+
+@pytest.fixture
+def sample_job_result():
+    """Dict matching JobResult schema."""
+    return {
+        "id": 123,
+        "title": "Senior Backend Engineer",
+        "location": "Remote",
+        "company_name": "Tech Corp",
+        "board_token": "example-board",
+        "source_url": "https://example.com/job/123",
+        "min_years_experience": 5,
+        "distance": 0.1,
+        "rerank_score": 0.95,
+        "explanation": "Strong match with Python and backend experience."
+    }
+
+@pytest.fixture
+def sample_match_response(sample_job_result):
+    """Dict matching MatchResponse schema."""
+    return {
+        "matches": [sample_job_result],
+        "total_candidates": 10,
+        "total_reranked": 5,
+        "filters_applied": {"degree": 1, "seniority": 2, "years": 5},
+        "run_id": "test-run-id"
+    }
