@@ -15,6 +15,7 @@ async def ready(
     db=Depends(get_db)
 ):
     checks = {}
+    all_ok = True
     
     # Check DB
     try:
@@ -24,6 +25,7 @@ async def ready(
         checks["db"] = "ok"
     except Exception as e:
         checks["db"] = f"error: {str(e)}"
+        all_ok = False
     
     # Check Chroma
     try:
@@ -31,6 +33,7 @@ async def ready(
         checks["chroma"] = "ok"
     except Exception as e:
         checks["chroma"] = f"error: {str(e)}"
+        all_ok = False
     
     # Check Voyage
     try:
@@ -39,12 +42,16 @@ async def ready(
         checks["voyage"] = "ok"
     except Exception as e:
         checks["voyage"] = f"error: {str(e)}"
+        all_ok = False
     
     # Determine overall status
-    all_ok = all(value == "ok" for value in checks.values())
     status = "ready" if all_ok else "degraded"
     
-    if all_ok:
-        return {"status": status, "checks": checks}
-    else:
-        raise HTTPException(status_code=503, detail={"status": status, "checks": checks})
+    # Return 503 if any check failed
+    if not all_ok:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": status, "checks": checks}
+        )
+    
+    return {"status": status, "checks": checks}

@@ -147,7 +147,7 @@ def test_match_cohere_exception_returns_503(api_client, mock_cohere):
 
 
 def test_match_unhandled_exception_returns_500(api_client, mock_voyage):
-    """POST /match with unhandled exception returns 500."""
+    """POST /match when VoyageAI fails returns 503."""
     mock_voyage.embed.side_effect = ValueError("Unexpected error")
     
     response = api_client.post(
@@ -155,9 +155,9 @@ def test_match_unhandled_exception_returns_500(api_client, mock_voyage):
         json={"resume": "a" * 50, "top_k": 10}
     )
     
-    assert response.status_code == 500
+    assert response.status_code == 503
     data = response.json()
-    assert data["error"] == "internal server error"
+    assert data["error"] == "embedding service unavailable"
     # Ensure no stack trace
     assert "traceback" not in str(data).lower()
     assert "Unexpected error" not in str(data)
@@ -420,15 +420,12 @@ def test_unhandled_exception_500(api_client):
         "resume": "a" * 50
     })
     
-    # The endpoint should catch this and return 500
-    # But according to our error handler, it should return 500 with "internal server error"
-    # However, the current implementation might not handle all cases
-    # Let's check what happens
-    if response.status_code == 500:
-        data = response.json()
-        assert "error" in data
-        # The error message should be "internal server error"
-        # but this depends on the implementation
+    # The endpoint catches Voyage exceptions and returns 503
+    assert response.status_code == 503
+    data = response.json()
+    assert "error" in data
+    # The error message should be "embedding service unavailable"
+    assert data["error"] == "embedding service unavailable"
     
     # Clean up
     app.dependency_overrides.clear()

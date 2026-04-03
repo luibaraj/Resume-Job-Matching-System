@@ -101,6 +101,14 @@ def api_client(mock_voyage, mock_collection, mock_db, mock_cohere):
     - get_db: returns mock_db
     - get_cohere_client: returns mock_cohere
     """
+    # Set required environment variables
+    import os
+    os.environ["CHROMA_DIR"] = "/tmp/test_chroma"
+    os.environ["CHROMA_COLLECTION"] = "test_collection"
+    os.environ["VOYAGE_API_KEY"] = "test_key"
+    os.environ["COHERE_API_KEY"] = "test_key"
+    os.environ["DB_PATH"] = "/tmp/test.db"
+    
     # Override dependencies
     app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
     app.dependency_overrides[get_chroma_collection] = lambda: mock_collection

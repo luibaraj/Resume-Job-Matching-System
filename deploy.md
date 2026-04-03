@@ -95,7 +95,6 @@ async def health():
 
 @router.get("/ready")
 async def ready():
-    # Phase 3: check DB, chroma, voyage connectivity
     return {"status": "ready"}
 ```
 
@@ -319,17 +318,21 @@ Register in `main.py`: `app.include_router(match.router)`
 
 ```python
 from fastapi.testclient import TestClient
-from api.main import app
+from fastapi_app.api.main import app
 
 client = TestClient(app)
 
 def test_health():
-    assert client.get("/health").status_code == 200
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {"status": "ok"}
 
-def test_ready_structure():
-    r = client.get("/ready")
-    assert r.status_code in (200, 503)
-    assert "status" in r.json()
+def test_ready():
+    response = client.get("/ready")
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {"status": "ready"}
 ```
 
 `tests/api/test_match.py` — mock `get_voyage_client` and `get_chroma_collection` with `pytest` fixtures + `app.dependency_overrides`.

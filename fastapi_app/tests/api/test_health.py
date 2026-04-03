@@ -265,12 +265,9 @@ def test_ready_partial_failure(api_client):
     # Clean up
     app.dependency_overrides.clear()
 
-def test_ready_checks_keys():
+def test_ready_checks_keys(api_client):
     """Test that /ready always returns exactly db, chroma, voyage keys."""
-    from fastapi_app.api.main import app
-    client = TestClient(app)
-    
-    response = client.get("/ready")
+    response = api_client.get("/ready")
     data = response.json()
     checks = data["checks"]
     

@@ -17,7 +17,25 @@ async def match(
     collection=Depends(get_chroma_collection),
     cohere_client=Depends(get_cohere_client)
 ):
-    # 1. Embed resume
+    # 1. Check if collection is empty
+    try:
+        job_count = collection.count()
+        if job_count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="no jobs in index"
+            )
+    except HTTPException:
+        # Re-raise HTTPException so it goes through the error handler
+        raise
+    except Exception as e:
+        logger.error(f"Failed to check collection count: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="failed to check job index"
+        )
+
+    # 2. Embed resume
     try:
         result = voyage_client.embed(
             [req.resume],
@@ -32,7 +50,7 @@ async def match(
             detail="embedding service unavailable"
         )
 
-    # 2. Retrieve from Chroma
+    # 3. Retrieve from Chroma
     try:
         retrieved = query_collection(collection, embedding, top_k=100)
     except Exception as e:
@@ -42,15 +60,18 @@ async def match(
             detail="retrieval error"
         )
     
+    # Return empty array if no jobs found (not 404)
     if not retrieved:
-        raise HTTPException(
-            status_code=404,
-            detail="no jobs in index"
-        )
+        return MatchResponse(matches=[], resume_id=None)
 
-    # 3. Rerank with Cohere
+    # 4. Rerank with Cohere - FIXED: use keyword argument for client
     try:
-        reranked = rerank_jobs(req.resume, retrieved, cohere_client, top_n=req.top_k)
+        reranked = rerank_jobs(
+            query=req.resume, 
+            jobs=retrieved, 
+            client=cohere_client,  # Use keyword argument
+            top_n=req.top_k
+        )
     except Exception as e:
         logger.error(f"Reranking failed: {e}")
         raise HTTPException(
@@ -58,14 +79,24 @@ async def match(
             detail="reranking service unavailable"
         )
 
-    # 4. Build response (skip explanation for now)
+    # 5. Build response (skip explanation for now)
     matches = []
-    for job in reranked:
+    # Limit to top_k matches
+    for job in reranked[:req.top_k]:
+        # Convert id to integer for job_id
+        try:
+            job_id = int(job['id'])
+        except (ValueError, KeyError):
+            job_id = 0
+        # Use distance as score (lower distance is better, but we can invert if needed)
+        # For now, use 1.0 - distance to have higher scores for more similar items
+        distance = job.get('distance', 1.0)
+        score = max(0.0, 1.0 - distance)
         matches.append(
             JobMatch(
-                job_id=job.job_id,
-                title=job.title,
-                score=job.score,
+                job_id=job_id,
+                title=job['title'],
+                score=score,
                 explanation=None
             )
         )
