@@ -1,0 +1,10 @@
+# FastAPI
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Pydantic
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Other dependencies already in main requirements.txt
+# (they will be installed from the parent directory)
