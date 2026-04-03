@@ -232,6 +232,7 @@ class TestWriteResultsMarkdown:
                 "source_url": "https://example.com/job-a",
                 "cleaned_description": "Some description",
                 "explanation": None,  # No explanation
+                "corpus_warning": CORPUS_LIMITATION_MESSAGE,
             },
             {
                 "id": 2,
@@ -240,6 +241,7 @@ class TestWriteResultsMarkdown:
                 "source_url": "https://example.com/job-b",
                 "cleaned_description": "Another description",
                 "explanation": None,  # No explanation
+                "corpus_warning": CORPUS_LIMITATION_MESSAGE,
             },
         ]
 

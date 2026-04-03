@@ -215,13 +215,10 @@ def write_results_markdown(results: list[dict] | list, output_path: str = "match
     """
     lines = ["# Top Matched Jobs (Reranked)\n"]
 
-    # Filter to only jobs with explanations
-    jobs_with_fits = [job for job in results if job.get("explanation") is not None]
-
-    if not jobs_with_fits:
+    if not results:
         lines.append(CORPUS_LIMITATION_MESSAGE)
     else:
-        for i, job in enumerate(jobs_with_fits, start=1):
+        for i, job in enumerate(results, start=1):
             title = job.get("title", "Unknown")
             board_token = job.get("board_token", "Unknown")
             url = job.get("source_url", "No URL")
@@ -237,8 +234,12 @@ def write_results_markdown(results: list[dict] | list, output_path: str = "match
 
             lines.append(f"- **URL:** [{url}]({url})\n")
 
+            # Render fit summary or corpus warning
             explanation = job.get("explanation")
-            lines.append(f"- **Fit Summary:** {explanation}\n")
+            if explanation is not None:
+                lines.append(f"- **Fit Summary:** {explanation}\n")
+            elif job.get("corpus_warning"):
+                lines.append(f"- **Note:** {job['corpus_warning']}\n")
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -273,7 +274,7 @@ def run_generation_for_results(
             continue
 
         try:
-            generation_output = run_generation_pipeline(
+            generation_results, corpus_message = run_generation_pipeline(
                 pairs=[(resume_text, description)],
                 model=model,
                 run_id=run_id,
@@ -292,13 +293,10 @@ def run_generation_for_results(
             job["explanation"] = None
             continue
 
-        if isinstance(generation_output, str):
-            # CORPUS_LIMITATION_MESSAGE returned — no grounded match found
-            logger.info("No grounded match for job '%s'.", job.get("title"))
-            job["explanation"] = None
-        else:
-            # list[PairResult] with exactly one element (we sent one pair)
-            job["explanation"] = generation_output[0]["explanation"]
+        # Unpack result (we sent exactly one pair)
+        job["explanation"] = generation_results[0]["explanation"]
+        if corpus_message is not None:
+            job["corpus_warning"] = corpus_message
 
 
 def main() -> None:

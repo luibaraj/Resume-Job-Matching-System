@@ -368,8 +368,8 @@ class TestFilterPairs:
         assert corpus_msg is None
 
     @patch("generation.ollama.chat")
-    def test_pair_with_zero_matches_scrapped(self, mock_chat):
-        """Pair with zero validated matches is excluded."""
+    def test_pair_with_zero_matches_retained(self, mock_chat):
+        """Pair with zero validated matches is retained with corpus warning."""
         mock_chat.side_effect = [
             make_ollama_response("1. Rust"),      # extract_requirements
             make_ollama_response("NOT FOUND"),     # find_resume_matches
@@ -378,11 +378,14 @@ class TestFilterPairs:
         pairs = [("Python resume", "Need Rust")]
         retained, corpus_msg = filter_pairs(pairs)
 
-        assert len(retained) == 0
+        assert len(retained) == 1
+        assert retained[0][2] == []  # validated_pairs is empty
+        assert corpus_msg is not None
+        assert "corpus limitations" in corpus_msg
 
     @patch("generation.ollama.chat")
-    def test_all_pairs_scrapped_returns_corpus_message(self, mock_chat):
-        """All pairs have zero matches; returns corpus message."""
+    def test_all_pairs_have_zero_matches_returns_corpus_message(self, mock_chat):
+        """All pairs have zero matches; still returns all pairs with corpus message."""
         mock_chat.side_effect = [
             make_ollama_response("1. Rust"),      # pair 1: extract
             make_ollama_response("NOT FOUND"),     # pair 1: find
@@ -393,13 +396,15 @@ class TestFilterPairs:
         pairs = [("Python resume", "Need Rust"), ("Python resume", "Need Go")]
         retained, corpus_msg = filter_pairs(pairs)
 
-        assert len(retained) == 0
+        assert len(retained) == 2
+        assert retained[0][2] == []  # both pairs have empty validated_pairs
+        assert retained[1][2] == []
         assert corpus_msg is not None
         assert "corpus limitations" in corpus_msg
 
     @patch("generation.ollama.chat")
-    def test_partial_scrapping_returns_none_message(self, mock_chat):
-        """Some pairs retained; message is None."""
+    def test_partial_scrapping_returns_corpus_message(self, mock_chat):
+        """Some pairs have zero matches; returns corpus warning."""
         mock_chat.side_effect = [
             make_ollama_response("1. Python"),           # pair 1: extract
             make_ollama_response("5 years of Python"),   # pair 1: find
@@ -410,8 +415,11 @@ class TestFilterPairs:
         pairs = [("5 years of Python", "Need Python"), ("Python resume", "Need Rust")]
         retained, corpus_msg = filter_pairs(pairs)
 
-        assert len(retained) == 1
-        assert corpus_msg is None
+        assert len(retained) == 2  # both pairs retained
+        assert retained[0][2] != []  # pair 1 has matches
+        assert retained[1][2] == []  # pair 2 has no matches
+        assert corpus_msg is not None  # corpus warning set
+        assert "corpus limitations" in corpus_msg
 
 
 # ============================================================================
@@ -563,7 +571,7 @@ class TestRunGenerationPipeline:
 
     @patch("generation.ollama.chat")
     def test_single_pair_happy_path(self, mock_chat):
-        """Single pair returns list with one PairResult."""
+        """Single pair returns tuple (list, corpus_msg) with one PairResult."""
         mock_chat.side_effect = [
             make_ollama_response("1. Python"),      # extract_requirements
             make_ollama_response("Python"),         # find_resume_matches
@@ -571,15 +579,16 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python developer", "Need Python")]
-        result = run_generation_pipeline(pairs)
+        result, corpus_msg = run_generation_pipeline(pairs)
 
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["explanation"] == "Good Python."
+        assert corpus_msg is None
 
     @patch("generation.ollama.chat")
     def test_returns_list_of_pair_results(self, mock_chat):
-        """Happy path returns list of PairResults with generated explanations."""
+        """Happy path returns tuple (list, corpus_msg) of PairResults with generated explanations."""
         mock_chat.side_effect = [
             make_ollama_response("Python and Javascript"),
             make_ollama_response("Python and Javascript"),
@@ -587,26 +596,31 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python and Javascript expert", "Required: Python and Javascript")]
-        result = run_generation_pipeline(pairs)
+        result, corpus_msg = run_generation_pipeline(pairs)
 
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["num_validated_pairs"] == 1
         assert result[0]["explanation"] == "Strong web developer."
+        assert corpus_msg is None
 
     @patch("generation.ollama.chat")
-    def test_returns_corpus_message_string_when_all_scrapped(self, mock_chat):
-        """All pairs have no matches; returns CORPUS_LIMITATION_MESSAGE string."""
+    def test_returns_corpus_message_when_all_pairs_have_zero_matches(self, mock_chat):
+        """All pairs have zero matches; returns corpus_message in tuple."""
         mock_chat.side_effect = [
             make_ollama_response("1. Rust"),
             make_ollama_response("NOT FOUND"),
         ]
 
         pairs = [("Python resume", "Need Rust")]
-        result = run_generation_pipeline(pairs)
+        result, corpus_msg = run_generation_pipeline(pairs)
 
-        assert isinstance(result, str)
-        assert "corpus limitations" in result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["explanation"] is None  # no explanation generated
+        assert result[0]["num_validated_pairs"] == 0
+        assert corpus_msg is not None
+        assert "corpus limitations" in corpus_msg
 
     @patch("generation.ollama.chat")
     def test_pair_result_has_required_keys(self, mock_chat):
@@ -618,7 +632,7 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python", "Need Python")]
-        result = run_generation_pipeline(pairs)
+        result, _ = run_generation_pipeline(pairs)
 
         assert isinstance(result, list)
         pair_result = result[0]
@@ -646,7 +660,7 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python developer", "Need Python and Rust")]
-        result = run_generation_pipeline(pairs)
+        result, _ = run_generation_pipeline(pairs)
 
         assert isinstance(result, list)
         assert result[0]["flagged_for_review"] is True
@@ -662,7 +676,7 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python resume", "Need Python")]
-        result = run_generation_pipeline(pairs)
+        result, _ = run_generation_pipeline(pairs)
 
         assert result[0]["flagged_for_review"] is False
         assert result[0]["hallucination_count"] == 0
@@ -677,7 +691,7 @@ class TestRunGenerationPipeline:
         ]
 
         pairs = [("Python", "Need Python")]
-        run_generation_pipeline(pairs, model="custom-model:latest")
+        _, _ = run_generation_pipeline(pairs, model="custom-model:latest")
 
         # Check that custom model was used in at least one call
         model_arg = None

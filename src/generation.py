@@ -341,7 +341,7 @@ def filter_pairs(
     model: str = OLLAMA_MODEL,
     run_id: str | None = None,
 ) -> tuple[list[tuple[str, str, list[RequirementMatch], int]], str | None]:
-    """Process batch and filter out pairs with zero validated matches.
+    """Process batch and retain all pairs (even with zero validated matches).
 
     Args:
         pairs: List of (resume, job_posting) tuples.
@@ -349,12 +349,13 @@ def filter_pairs(
         run_id: Optional trace ID for request tracing.
 
     Returns:
-        Tuple of (retained_pairs, corpus_message).
-        If all pairs scrapped: ([], CORPUS_LIMITATION_MESSAGE).
-        Otherwise: (retained, None).
-        Each retained element is (resume, job_posting, validated_pairs, hallucination_count).
+        Tuple of (all_pairs, corpus_message).
+        If any pair has zero validated matches: (all_pairs, CORPUS_LIMITATION_MESSAGE).
+        Otherwise: (all_pairs, None).
+        Each element is (resume, job_posting, validated_pairs, hallucination_count).
     """
-    retained = []
+    all_pairs = []
+    has_zero_matches = False
 
     for resume, job_posting in pairs:
         # Extract requirements from job posting
@@ -363,17 +364,17 @@ def filter_pairs(
         # Find resume matches
         validated_pairs, hallucination_count = find_resume_matches(resume, requirements, model, run_id=run_id)
 
-        # Keep only if we have at least one validated match
-        if validated_pairs:
-            retained.append((resume, job_posting, validated_pairs, hallucination_count))
+        # Keep all pairs, track if any have zero validated matches
+        all_pairs.append((resume, job_posting, validated_pairs, hallucination_count))
+        if not validated_pairs:
+            has_zero_matches = True
 
-    # Check if all pairs were scrapped
-    if not retained:
-        logger.warning("All pairs scrapped — corpus limitation detected")
-        return [], CORPUS_LIMITATION_MESSAGE
-
-    logger.debug("Retained %d out of %d pairs", len(retained), len(pairs))
-    return retained, None
+    corpus_message = CORPUS_LIMITATION_MESSAGE if has_zero_matches else None
+    if has_zero_matches:
+        logger.warning("Some pairs have zero validated matches — corpus limitation warning")
+    else:
+        logger.debug("All %d pairs have validated matches", len(all_pairs))
+    return all_pairs, corpus_message
 
 
 def generate_explanation(
@@ -432,11 +433,11 @@ def run_generation_pipeline(
     pairs: list[tuple[str, str]],
     model: str = OLLAMA_MODEL,
     run_id: str | None = None,
-) -> list[PairResult] | str:
+) -> tuple[list[PairResult], str | None]:
     """Run full generation pipeline on a batch of (resume, job_posting) pairs.
 
-    Processes the batch, filters out pairs with no validated matches,
-    generates explanations, and logs results.
+    Processes the batch, generates explanations for all pairs (or None if no matches),
+    and logs results.
 
     Args:
         pairs: List of (resume, job_posting) tuples (max 10).
@@ -444,7 +445,8 @@ def run_generation_pipeline(
         run_id: Optional trace ID for request tracing.
 
     Returns:
-        List of PairResult dicts, or CORPUS_LIMITATION_MESSAGE string if all filtered.
+        Tuple of (list of PairResult dicts, corpus_message or None).
+        corpus_message is set if any pair has zero validated matches.
 
     Raises:
         ValueError: If len(pairs) > MAX_BATCH_SIZE.
@@ -452,17 +454,18 @@ def run_generation_pipeline(
     if len(pairs) > MAX_BATCH_SIZE:
         raise ValueError(f"Batch size {len(pairs)} exceeds max {MAX_BATCH_SIZE}")
 
-    # Filter pairs
-    retained, corpus_message = filter_pairs(pairs, model, run_id=run_id)
-
-    # If all filtered, return corpus message
-    if corpus_message is not None:
-        return corpus_message
+    # Filter pairs (now keeps all pairs)
+    all_pairs, corpus_message = filter_pairs(pairs, model, run_id=run_id)
 
     # Generate explanations and build results
     results = []
-    for _, _, validated_pairs, hallucination_count in retained:
-        explanation = generate_explanation(validated_pairs, model, run_id=run_id)
+    for _, _, validated_pairs, hallucination_count in all_pairs:
+        # Skip explanation generation if no validated matches
+        if validated_pairs:
+            explanation = generate_explanation(validated_pairs, model, run_id=run_id)
+        else:
+            explanation = None
+
         result: PairResult = {
             "explanation": explanation,
             "validated_pairs": validated_pairs,
@@ -473,4 +476,4 @@ def run_generation_pipeline(
         log_result(result)
         results.append(result)
 
-    return results
+    return results, corpus_message
