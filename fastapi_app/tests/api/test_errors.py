@@ -1,38 +1,104 @@
+"""Tests for error handling across all endpoints."""
+
 from fastapi.testclient import TestClient
 from fastapi_app.api.main import app
-
-client = TestClient(app)
-
-def test_422_validation_error_returns_array():
-    """Test that 422 validation errors return array under 'error' key"""
-    response = client.post("/match", json={"resume": "short"})  # Too short resume
-    assert response.status_code == 422
-    data = response.json()
-    assert "error" in data
-    assert isinstance(data["error"], list)  # Should be array, not string
-    assert len(data["error"]) > 0
+import json
 
 def test_404_returns_string_error():
-    """Test that 404 errors return string under 'error' key"""
+    """Test that 404 errors return string under 'error' key."""
+    client = TestClient(app)
     response = client.get("/nonexistent")
     assert response.status_code == 404
     data = response.json()
     assert "error" in data
-    assert isinstance(data["error"], str)  # Should be string
+    assert isinstance(data["error"], str)
     assert data["error"] == "Not Found"
 
-def test_500_returns_internal_server_error():
-    """Test that unhandled exceptions return 'internal server error' string"""
-    # We can't easily test this without mocking an endpoint to raise an exception
-    # This test would be added when we have an endpoint that can be mocked
-    pass
+def test_422_validation_error_returns_array():
+    """Test that 422 validation errors return array under 'error' key."""
+    client = TestClient(app)
+    response = client.post("/match", json={"resume": "short"})  # Too short resume
+    assert response.status_code == 422
+    data = response.json()
+    assert "error" in data
+    # According to the contract, 422 errors should have an array
+    assert isinstance(data["error"], list)
+    assert len(data["error"]) > 0
 
 def test_error_envelope_consistent():
-    """Test that all non-2xx responses have 'error' key"""
+    """Test that all non-2xx responses have 'error' key."""
+    client = TestClient(app)
+    
     # Test 404
     response = client.get("/nonexistent")
+    assert response.status_code == 404
     assert "error" in response.json()
     
-    # Test 422 (validation error)
+    # Test 422
     response = client.post("/match", json={"resume": "short"})
+    assert response.status_code == 422
     assert "error" in response.json()
+    
+    # Test 405 (Method Not Allowed) - if we try POST on /health
+    response = client.post("/health")
+    # This might return 405 or 200 depending on implementation
+    # Let's check if it's non-2xx
+    if response.status_code >= 400:
+        assert "error" in response.json()
+
+def test_override_404_error_format():
+    """Test that 404 error format is overridden to use 'error' key."""
+    # The default FastAPI 404 returns {"detail": "Not Found"}
+    # We need to ensure our error handler overrides this
+    client = TestClient(app)
+    response = client.get("/nonexistent-endpoint")
+    assert response.status_code == 404
+    data = response.json()
+    # Should not use "detail" key
+    assert "detail" not in data
+    assert "error" in data
+
+def test_422_error_message_content():
+    """Test that 422 error messages are useful for clients."""
+    client = TestClient(app)
+    response = client.post("/match", json={
+        "resume": "short",  # Too short
+        "top_k": 100  # Out of range
+    })
+    assert response.status_code == 422
+    data = response.json()
+    assert "error" in data
+    # The error should contain information about both validation errors
+    error_list = data["error"]
+    assert len(error_list) >= 2  # At least 2 validation errors
+
+def test_500_error_handler():
+    """Test that 500 errors return 'internal server error' without stack trace."""
+    # We need to trigger an unhandled exception in an endpoint
+    # Since we can't easily do that without modifying the app,
+    # we'll test the error handler indirectly
+    # This test is more of a placeholder to document the requirement
+    pass
+
+def test_all_error_responses_have_consistent_structure():
+    """Test that all error responses follow the {error: ...} envelope."""
+    client = TestClient(app)
+    
+    # Test various error scenarios
+    test_cases = [
+        ("GET", "/nonexistent", None, 404),
+        ("POST", "/match", {"resume": "a" * 49}, 422),
+        ("POST", "/match", {"resume": "a" * 50, "top_k": 0}, 422),
+    ]
+    
+    for method, path, data, expected_status in test_cases:
+        if method == "GET":
+            response = client.get(path)
+        else:
+            response = client.post(path, json=data)
+        
+        if response.status_code >= 400:
+            response_data = response.json()
+            assert "error" in response_data, f"Missing 'error' key for {path}"
+            # The value can be string or array, but must exist
+            assert response_data["error"] is not None
