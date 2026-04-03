@@ -401,3 +401,244 @@ DB_PATH=/app/data/jobs.db
 CHROMA_DIR=/app/data/chroma
 CHROMA_COLLECTION=jobs
 ```
+
+---
+
+## API Contracts
+
+These contracts are the ground truth for test-first development. Write tests against these before implementing any handler. Implementation must not deviate without updating this section first.
+
+---
+
+### `GET /health`
+
+**Purpose:** Liveness check — is the process running?
+
+**Auth:** None
+
+**Response — always 200:**
+
+```json
+{ "status": "ok" }
+```
+
+**Never returns non-200.** If the server is up, this is 200. No dependency checks here.
+
+**Tests to write:**
+
+- Returns 200
+- Body is exactly `{"status": "ok"}`
+- Response time < 50ms (no I/O)
+
+---
+
+### `GET /ready`
+
+**Purpose:** Readiness check — are all dependencies reachable?
+
+**Auth:** None
+
+**Response — 200 when all deps healthy:**
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "db": "ok",
+    "chroma": "ok",
+    "voyage": "ok"
+  }
+}
+```
+
+**Response — 503 when any dep fails:**
+
+```json
+{
+  "status": "degraded",
+  "checks": {
+    "db": "ok",
+    "chroma": "error: collection not found",
+    "voyage": "ok"
+  }
+}
+```
+
+**Contract rules:**
+
+- Always returns one of: `200` or `503`
+- `checks` always contains exactly the keys: `db`, `chroma`, `voyage`
+- Each check value is either the string `"ok"` or a string starting with `"error:"`
+- `status` is `"ready"` iff all checks are `"ok"`, otherwise `"degraded"`
+
+**Tests to write:**
+
+- All healthy → 200, `status == "ready"`, all checks `"ok"`
+- DB unreachable (override dep) → 503, `status == "degraded"`, `db` starts with `"error:"`
+- Chroma unreachable → 503, `chroma` starts with `"error:"`
+- Voyage unreachable → 503, `voyage` starts with `"error:"`
+- Partial failure → only failing check shows error, others show `"ok"`
+
+---
+
+### `POST /match`
+
+**Purpose:** Core pipeline — embed resume, retrieve + rerank jobs, return ranked matches.
+
+**Auth:** None (add API key header in Phase 6 hardening if needed)
+
+**Content-Type:** `application/json`
+
+**Request body:**
+
+```json
+{
+  "resume": "<resume text>",
+  "top_k": 10
+}
+```
+
+| Field    | Type    | Required | Constraints         | Default |
+| -------- | ------- | -------- | ------------------- | ------- |
+| `resume` | string  | yes      | min length 50 chars | —       |
+| `top_k`  | integer | no       | 1–50 inclusive      | 10      |
+
+**Response — 200:**
+
+```json
+{
+  "matches": [
+    {
+      "job_id": 42,
+      "title": "Senior Backend Engineer",
+      "score": 0.91,
+      "explanation": "Strong Python and AWS experience aligns with..."
+    }
+  ],
+  "resume_id": "a3f9c2b1"
+}
+```
+
+| Field                   | Type    | Nullable | Notes                                                         |
+| ----------------------- | ------- | -------- | ------------------------------------------------------------- |
+| `matches`               | array   | no       | ordered by `score` descending; length ≤ `top_k`               |
+| `matches[].job_id`      | integer | no       | corresponds to `jobs.id` in SQLite                            |
+| `matches[].title`       | string  | no       |                                                               |
+| `matches[].score`       | float   | no       | range [0.0, 1.0]; reranker relevance score                    |
+| `matches[].explanation` | string  | yes      | `null` if Ollama unavailable or skipped                       |
+| `resume_id`             | string  | yes      | first 8 chars of SHA-256 of resume text; `null` until Phase 6 |
+
+**Error responses:**
+
+| Status | `error` value                     | Condition                                            |
+| ------ | --------------------------------- | ---------------------------------------------------- |
+| 422    | Pydantic detail array             | `resume` missing, too short, or `top_k` out of range |
+| 404    | `"no jobs in index"`              | ChromaDB collection is empty                         |
+| 503    | `"embedding service unavailable"` | Voyage API call fails                                |
+| 503    | `"reranking service unavailable"` | Cohere API call fails                                |
+| 500    | `"internal server error"`         | Any other unhandled exception                        |
+
+All error responses use this envelope:
+
+```json
+{ "error": "<message>" }
+```
+
+Never expose stack traces, internal paths, or dependency names in error messages returned to clients.
+
+**Contract rules:**
+
+- `matches` is always an array (empty array `[]` is valid if index has jobs but none score above threshold — not a 404)
+- 404 is only raised when the index is completely empty
+- `matches` length is always ≤ `top_k`; may be less if fewer jobs exist
+- `score` is always a float, never `null`
+- Response is always valid against the schema even when `explanation` is null
+
+**Tests to write:**
+
+_Validation:_
+
+- Missing `resume` → 422
+- `resume` length 49 chars → 422
+- `resume` length 50 chars → 200 (boundary)
+- `top_k = 0` → 422
+- `top_k = 51` → 422
+- `top_k = 50` → 200 (boundary)
+- `top_k` omitted → 200, defaults to 10
+
+_Happy path (mock voyage + chroma + cohere):_
+
+- Valid resume → 200
+- `matches` is a list
+- Each match has `job_id` (int), `title` (str), `score` (float)
+- `matches` length ≤ `top_k`
+- `matches` sorted by `score` descending
+- `explanation` is str or null (not missing key)
+
+_Error paths (override deps to raise):_
+
+- Empty chroma collection → 404, `{"error": "no jobs in index"}`
+- Voyage raises exception → 503, `{"error": "embedding service unavailable"}`
+- Cohere raises exception → 503, `{"error": "reranking service unavailable"}`
+- Unhandled exception in handler → 500, `{"error": "internal server error"}` (no traceback)
+
+---
+
+### Error Envelope Contract
+
+All non-2xx responses across **all** endpoints conform to:
+
+```json
+{ "error": "<human-readable string>" }
+```
+
+FastAPI's default 422 validation error format is **overridden** to also use this envelope. The `detail` array from Pydantic is collapsed into a single readable string or kept as-is under `"error"` — pick one and be consistent. Recommended: keep Pydantic's `detail` array as the value of `"error"` for 422s since it's machine-readable and useful for clients.
+
+**Tests to write:**
+
+- 404 on unknown route → check body has `"error"` key (FastAPI default is `{"detail":"Not Found"}` — override this)
+- 422 on bad body → body has `"error"` key
+
+---
+
+### Dependency Override Pattern (for all tests)
+
+All tests use `app.dependency_overrides` to avoid real I/O:
+
+```python
+# conftest.py for tests/api/
+import pytest
+from fastapi.testclient import TestClient
+from api.main import app
+from api.dependencies import get_voyage_client, get_chroma_collection, get_db
+from unittest.mock import MagicMock
+
+@pytest.fixture
+def mock_voyage():
+    client = MagicMock()
+    client.embed.return_value = MagicMock(embeddings=[[0.1] * 1024])
+    return client
+
+@pytest.fixture
+def mock_collection():
+    col = MagicMock()
+    col.count.return_value = 5
+    col.query.return_value = {
+        "ids": [["1", "2", "3"]],
+        "documents": [["Job A desc", "Job B desc", "Job C desc"]],
+        "metadatas": [[{"title": "Eng A", "job_id": 1},
+                       {"title": "Eng B", "job_id": 2},
+                       {"title": "Eng C", "job_id": 3}]],
+        "distances": [[0.1, 0.2, 0.3]],
+    }
+    return col
+
+@pytest.fixture
+def api_client(mock_voyage, mock_collection):
+    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
+    app.dependency_overrides[get_chroma_collection] = lambda: mock_collection
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+```
+
+Use `api_client` fixture in all `test_match.py` tests. For error path tests, override the dep to raise the relevant exception inline per test.
