@@ -11,7 +11,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from fastapi_app.api.main import app
-from fastapi_app.api.dependencies import get_voyage_client, get_chroma_collection, get_db
+from fastapi_app.api.dependencies import get_voyage_client, get_chroma_collection, get_db, get_cohere_client
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ def mock_cohere():
 
 
 @pytest.fixture
-def api_client(mock_voyage, mock_collection, mock_db):
+def api_client(mock_voyage, mock_collection, mock_db, mock_cohere):
     """
     TestClient with all dependencies overridden.
     
@@ -99,11 +99,13 @@ def api_client(mock_voyage, mock_collection, mock_db):
     - get_voyage_client: returns mock_voyage
     - get_chroma_collection: returns mock_collection  
     - get_db: returns mock_db
+    - get_cohere_client: returns mock_cohere
     """
     # Override dependencies
     app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
     app.dependency_overrides[get_chroma_collection] = lambda: mock_collection
     app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_cohere_client] = lambda: mock_cohere
     
     yield TestClient(app)
     
