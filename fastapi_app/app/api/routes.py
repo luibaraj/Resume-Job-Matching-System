@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.schemas import ResumeRequest, MatchResponse, HealthResponse
 from app.services.matching_service import MatchingService
 from app.dependencies import get_matching_service
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ async def health_check(
         chroma_count = 0
 
     return HealthResponse(
-        status="ok",
+        status="healthy",
         ollama_available=ollama_available,
         database_available=database_available,
         chroma_collection_count=chroma_count,
@@ -75,8 +76,8 @@ async def match_resume(
     try:
         result = matching_service.match(
             resume_text=request.resume_text,
-            top_k=request.top_k or 100,
-            top_n=request.top_k or 10,  # Use same as top_k if not specified
+            top_k=request.top_k or settings.RETRIEVE_TOP_K,
+            top_n=settings.RERANK_TOP_N,  # Use default from settings, not top_k
             use_filters=request.use_filters,
             include_explanations=request.include_explanations,
         )

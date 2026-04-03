@@ -9,14 +9,14 @@ import time
 
 import cohere
 
-from config import (
+from src.config import (
     COHERE_RERANK_MODEL,
     RERANK_TOP_N,
     RERANK_MAX_RETRIES,
     RERANK_RETRY_BASE_DELAY,
     RERANK_INTER_REQUEST_DELAY,
 )
-from retrieval import JobResult
+from src.retrieval import JobResult
 
 logger = logging.getLogger(__name__)
 

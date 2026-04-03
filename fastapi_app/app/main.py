@@ -6,6 +6,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import sys
+from pathlib import Path
+
+# Add project root to Python path                                                                                                                                                                              
+sys.path.insert(0, str(Path(__file__).parent.parent))    
 
 from app.api.routes import router
 from app.config import settings

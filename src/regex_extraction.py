@@ -9,7 +9,7 @@ simply skips a filter condition; a false positive could incorrectly exclude good
 import re
 from typing import Optional
 
-from config import (
+from src.config import (
     DEGREE_BACHELOR,
     DEGREE_MASTER,
     DEGREE_PHD,

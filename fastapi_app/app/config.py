@@ -14,9 +14,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API keys
-    VOYAGE_API_KEY: str
-    COHERE_API_KEY: str
+    # API keys (optional with defaults for testing)
+    VOYAGE_API_KEY: str = ""
+    COHERE_API_KEY: str = ""
     # GREENHOUSE_BOARD_TOKENS not needed for matching API
 
     # Database

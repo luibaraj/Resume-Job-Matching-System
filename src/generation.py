@@ -19,7 +19,7 @@ from typing import TypedDict
 
 import ollama
 
-from config import (
+from src.config import (
     CORPUS_LIMITATION_MESSAGE,
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,

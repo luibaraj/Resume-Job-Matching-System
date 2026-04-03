@@ -13,15 +13,15 @@ import chromadb
 from chromadb.api import ClientAPI
 import numpy as np
 
-from config import (
+from src.config import (
     CHROMA_COLLECTION_NAME,
     DEGREE_UNKNOWN,
     EMBEDDING_DIM,
     SENIORITY_UNKNOWN,
     YEARS_UNKNOWN,
 )
-from embedding import deserialize_embedding
-from regex_extraction import (
+from src.embedding import deserialize_embedding
+from src.regex_extraction import (
     extract_degree_requirement,
     extract_seniority_from_title,
     extract_seniority_level,

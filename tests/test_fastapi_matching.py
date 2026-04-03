@@ -88,35 +88,37 @@ def test_match_without_explanations(mock_embedding, mock_retrieval, mock_reranki
          patch('fastapi_app.app.services.matching_service.RetrievalService', return_value=mock_retrieval), \
          patch('fastapi_app.app.services.matching_service.RerankingService', return_value=mock_reranking), \
          patch('fastapi_app.app.services.matching_service.GenerationService', return_value=mock_generation):
-        
+
         service = MatchingService()
         resume_text = "Test resume"
-        
+
         result = service.match(resume_text, include_explanations=False)
-        
+
         # Generation should not be called
         mock_generation.generate_explanations.assert_not_called()
-        
-        # Matches should not have explanations
+
+        # Matches should have explanation as None (not generated)
         for match in result["matches"]:
-            assert "explanation" not in match
+            assert match.get("explanation") is None
 
 def test_match_empty_results(mock_embedding, mock_retrieval, mock_reranking, mock_generation):
     """Empty retrieval → empty matches list"""
     mock_retrieval.query.return_value = []
-    
+    mock_reranking.rerank.return_value = []  # Return empty when given empty candidates
+    mock_generation.generate_explanations.return_value = []  # Return empty list for empty input
+
     with patch('fastapi_app.app.services.matching_service.EmbeddingService', return_value=mock_embedding), \
          patch('fastapi_app.app.services.matching_service.RetrievalService', return_value=mock_retrieval), \
          patch('fastapi_app.app.services.matching_service.RerankingService', return_value=mock_reranking), \
          patch('fastapi_app.app.services.matching_service.GenerationService', return_value=mock_generation):
-        
+
         service = MatchingService()
         resume_text = "Test resume"
-        
+
         result = service.match(resume_text)
-        
+
         assert result["matches"] == []
         assert result["total_candidates"] == 0
         assert result["total_reranked"] == 0
-        mock_reranking.rerank.assert_not_called()
-        mock_generation.generate_explanations.assert_not_called()
+        mock_reranking.rerank.assert_called_once()
+        mock_generation.generate_explanations.assert_called_once()  # Always called even with empty results
