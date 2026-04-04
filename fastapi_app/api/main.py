@@ -1,4 +1,8 @@
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()  # Loads .env from current directory
+
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi_app.api.routers import health, match

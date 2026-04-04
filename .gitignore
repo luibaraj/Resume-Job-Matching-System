@@ -3,7 +3,7 @@
 Thumbs.db
 
 # Environment                                                                                                               
-.env*                                                                                                                       
+.env                                                                                                                     
 .python-version 
 .env
 .env.local
@@ -66,6 +66,6 @@ matched_jobs.md
 CONVENTIONS.md
 
 
-# Plans
+# Contracts
 
-fastapi_app/deploy.md
+fastapi_app/contracts.md

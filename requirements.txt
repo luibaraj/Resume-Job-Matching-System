@@ -36,3 +36,4 @@ mlflow>=2.14.0
 # Some transitive dependencies (via voyageai, chromadb, etc.) use SWIG-wrapped C extensions
 # that lack proper __module__ attributes, triggering a harmless deprecation warning in Python 3.11+.
 # This is suppressed globally in src/__init__.py. See: https://github.com/pytorch/ao/issues/2752
+python-dotenv>=1.0.0

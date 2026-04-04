@@ -1,7 +1,11 @@
 """Tests for /health and /ready endpoints."""
 
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import pytest
+from fastapi.testclient import TestClient
+from fastapi_app.api.main import app
+import sqlite3
 
 
 def test_health_endpoint_returns_200(api_client):
@@ -23,256 +27,160 @@ def test_health_response_time_under_50ms(api_client):
     assert response.status_code == 200
 
 
-def test_ready_all_healthy_returns_200(api_client, mock_db, mock_collection, mock_voyage):
+def test_ready_all_healthy_returns_200(api_client, mock_db, mock_collection, mock_voyage, mock_ollama_health):
     """GET /ready returns 200 when all dependencies are healthy."""
     # Setup all mocks to succeed
     mock_db.cursor().fetchone.return_value = (1,)  # DB check passes
     mock_collection.count.return_value = 5  # Chroma has data
     mock_voyage.embed.return_value.embeddings = [[0.1] * 1024]  # Voyage works
+    mock_ollama_health.return_value = (True, "Ollama is healthy")  # Ollama works
     
     response = api_client.get("/ready")
     
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert data["checks"] == {
-        "db": "ok",
-        "chroma": "ok", 
-        "voyage": "ok"
-    }
+    # Check all 4 services are present and healthy
+    assert "checks" in data
+    checks = data["checks"]
+    assert len(checks) == 4
+    assert checks["database"]["healthy"] is True
+    assert checks["chroma"]["healthy"] is True
+    assert checks["voyage"]["healthy"] is True
+    assert checks["ollama"]["healthy"] is True
 
 
-def test_ready_db_unreachable_returns_503(api_client, mock_db):
+def test_ready_db_unreachable_returns_503(api_client, mock_db, mock_ollama_health):
     """GET /ready returns 503 when DB is unreachable."""
     # Make DB check fail
     mock_db.cursor().execute.side_effect = Exception("Connection failed")
+    mock_ollama_health.return_value = (True, "Ollama is healthy")
     
     response = api_client.get("/ready")
     
     assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "degraded"
-    assert data["checks"]["db"].startswith("error:")
-    assert data["checks"]["chroma"] == "ok"
-    assert data["checks"]["voyage"] == "ok"
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["database"]["healthy"] is False
+    assert "error" in checks["database"]["message"].lower()
+    assert checks["chroma"]["healthy"] is True
+    assert checks["voyage"]["healthy"] is True
+    assert checks["ollama"]["healthy"] is True
 
 
-def test_ready_chroma_unreachable_returns_503(api_client, mock_collection):
+def test_ready_chroma_unreachable_returns_503(api_client, mock_collection, mock_ollama_health):
     """GET /ready returns 503 when ChromaDB is unreachable."""
     # Make Chroma check fail
     mock_collection.count.side_effect = Exception("Collection not found")
+    mock_ollama_health.return_value = (True, "Ollama is healthy")
     
     response = api_client.get("/ready")
     
     assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "degraded"
-    assert data["checks"]["db"] == "ok"
-    assert data["checks"]["chroma"].startswith("error:")
-    assert data["checks"]["voyage"] == "ok"
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["database"]["healthy"] is True
+    assert checks["chroma"]["healthy"] is False
+    assert "error" in checks["chroma"]["message"].lower()
+    assert checks["voyage"]["healthy"] is True
+    assert checks["ollama"]["healthy"] is True
 
 
-def test_ready_voyage_unreachable_returns_503(api_client, mock_voyage):
+def test_ready_voyage_unreachable_returns_503(api_client, mock_voyage, mock_ollama_health):
     """GET /ready returns 503 when VoyageAI is unreachable."""
     # Make Voyage check fail
     mock_voyage.embed.side_effect = Exception("API key invalid")
+    mock_ollama_health.return_value = (True, "Ollama is healthy")
     
     response = api_client.get("/ready")
     
     assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "degraded"
-    assert data["checks"]["db"] == "ok"
-    assert data["checks"]["chroma"] == "ok"
-    assert data["checks"]["voyage"].startswith("error:")
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["database"]["healthy"] is True
+    assert checks["chroma"]["healthy"] is True
+    assert checks["voyage"]["healthy"] is False
+    assert "error" in checks["voyage"]["message"].lower()
+    assert checks["ollama"]["healthy"] is True
 
 
-def test_ready_partial_failure_shows_only_failing_checks(api_client, mock_db, mock_voyage):
+def test_ready_ollama_unreachable_returns_503(api_client, mock_ollama_health):
+    """GET /ready returns 503 when Ollama is unreachable."""
+    # Make Ollama check fail
+    mock_ollama_health.return_value = (False, "Connection failed")
+    
+    response = api_client.get("/ready")
+    
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["database"]["healthy"] is True
+    assert checks["chroma"]["healthy"] is True
+    assert checks["voyage"]["healthy"] is True
+    assert checks["ollama"]["healthy"] is False
+    assert "connection" in checks["ollama"]["message"].lower()
+
+
+def test_ready_ollama_missing_model_returns_503(api_client, mock_ollama_health):
+    """GET /ready returns 503 when Ollama missing required model."""
+    # Make Ollama check fail due to missing model
+    mock_ollama_health.return_value = (False, "Required model 'llama3.2:3b-instruct-q4_K_M' not found in Ollama")
+    
+    response = api_client.get("/ready")
+    
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["ollama"]["healthy"] is False
+    assert "model" in checks["ollama"]["message"].lower()
+
+
+def test_ready_partial_failure_shows_only_failing_checks(api_client, mock_db, mock_voyage, mock_ollama_health):
     """GET /ready with partial failure shows only failing checks as errors."""
-    # Make DB and Voyage fail, Chroma succeed
+    # Make DB and Voyage fail, Chroma and Ollama succeed
     mock_db.cursor().execute.side_effect = Exception("DB connection failed")
     mock_voyage.embed.side_effect = Exception("Voyage API error")
+    mock_ollama_health.return_value = (True, "Ollama is healthy")
     
     response = api_client.get("/ready")
     
     assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "degraded"
-    assert data["checks"]["db"].startswith("error:")
-    assert data["checks"]["chroma"] == "ok"  # Only Chroma is healthy
-    assert data["checks"]["voyage"].startswith("error:")
+    assert data["status"] == "not ready"
+    checks = data["checks"]
+    assert checks["database"]["healthy"] is False
+    assert checks["chroma"]["healthy"] is True  # Only Chroma and Ollama are healthy
+    assert checks["voyage"]["healthy"] is False
+    assert checks["ollama"]["healthy"] is True
 
 
-def test_ready_checks_always_has_three_keys(api_client):
-    """GET /ready always returns checks with exactly three keys."""
+def test_ready_checks_always_has_four_keys(api_client):
+    """GET /ready always returns checks with exactly four keys."""
     response = api_client.get("/ready")
     data = response.json()
     
     checks = data["checks"]
-    assert set(checks.keys()) == {"db", "chroma", "voyage"}
-    assert len(checks) == 3
-"""Tests for health and readiness endpoints."""
+    assert set(checks.keys()) == {"database", "chroma", "voyage", "ollama"}
+    assert len(checks) == 4
+    # Each check should have healthy boolean and message string
+    for service, check in checks.items():
+        assert "healthy" in check
+        assert isinstance(check["healthy"], bool)
+        assert "message" in check
+        assert isinstance(check["message"], str)
 
-from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
-import pytest
-from fastapi_app.api.dependencies import get_voyage_client, get_chroma_collection, get_db
-import sqlite3
 
-def test_health_endpoint_returns_200():
-    """Test that GET /health always returns 200 with correct structure."""
-    from fastapi_app.api.main import app
-    client = TestClient(app)
-    
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data == {"status": "ok"}
-
-def test_health_response_time():
-    """Test that /health response time is fast (no I/O)."""
-    from fastapi_app.api.main import app
-    client = TestClient(app)
-    
-    import time
-    start = time.time()
-    response = client.get("/health")
-    end = time.time()
-    
-    assert response.status_code == 200
-    # Should be very fast - less than 50ms as per contract
-    assert (end - start) < 0.05  # 50ms
-
-def test_ready_all_healthy(api_client):
-    """Test /ready when all dependencies are healthy."""
-    # api_client fixture already has all mocks
+def test_ready_response_time_under_2s(api_client):
+    """GET /ready response time < 2s (due to external service checks)."""
+    start_time = time.time()
     response = api_client.get("/ready")
+    end_time = time.time()
     
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ready"
-    assert "checks" in data
-    checks = data["checks"]
-    assert checks["db"] == "ok"
-    assert checks["chroma"] == "ok"
-    assert checks["voyage"] == "ok"
-
-def test_ready_db_unhealthy(api_client):
-    """Test /ready when database is unreachable."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock that raises an exception
-    mock_db = MagicMock()
-    mock_db.cursor.side_effect = sqlite3.OperationalError("database not found")
-    
-    # Override the get_db dependency
-    from fastapi_app.api.dependencies import get_db
-    app.dependency_overrides[get_db] = lambda: mock_db
-    
-    client = TestClient(app)
-    response = client.get("/ready")
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert data["status"] == "degraded"
-    checks = data["checks"]
-    assert checks["db"].startswith("error:")
-    assert checks["chroma"] == "ok"
-    assert checks["voyage"] == "ok"
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_ready_chroma_unhealthy(api_client):
-    """Test /ready when ChromaDB is unreachable."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock that raises an exception
-    mock_collection = MagicMock()
-    mock_collection.count.side_effect = Exception("connection failed")
-    
-    # Override the get_chroma_collection dependency
-    from fastapi_app.api.dependencies import get_chroma_collection
-    app.dependency_overrides[get_chroma_collection] = lambda: mock_collection
-    
-    client = TestClient(app)
-    response = client.get("/ready")
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert data["status"] == "degraded"
-    checks = data["checks"]
-    assert checks["db"] == "ok"
-    assert checks["chroma"].startswith("error:")
-    assert checks["voyage"] == "ok"
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_ready_voyage_unhealthy(api_client):
-    """Test /ready when VoyageAI is unreachable."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock that raises an exception
-    mock_voyage = MagicMock()
-    mock_voyage.embed.side_effect = Exception("API key invalid")
-    
-    # Override the get_voyage_client dependency
-    from fastapi_app.api.dependencies import get_voyage_client
-    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
-    
-    client = TestClient(app)
-    response = client.get("/ready")
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert data["status"] == "degraded"
-    checks = data["checks"]
-    assert checks["db"] == "ok"
-    assert checks["chroma"] == "ok"
-    assert checks["voyage"].startswith("error:")
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_ready_partial_failure(api_client):
-    """Test /ready when multiple dependencies fail."""
-    from fastapi_app.api.main import app
-    
-    # Create mocks that raise exceptions
-    mock_db = MagicMock()
-    mock_db.cursor.side_effect = sqlite3.OperationalError("database not found")
-    
-    mock_voyage = MagicMock()
-    mock_voyage.embed.side_effect = Exception("API key invalid")
-    
-    # Override dependencies
-    from fastapi_app.api.dependencies import get_db, get_voyage_client
-    app.dependency_overrides[get_db] = lambda: mock_db
-    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
-    
-    client = TestClient(app)
-    response = client.get("/ready")
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert data["status"] == "degraded"
-    checks = data["checks"]
-    assert checks["db"].startswith("error:")
-    assert checks["chroma"] == "ok"  # This one is still healthy
-    assert checks["voyage"].startswith("error:")
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_ready_checks_keys(api_client):
-    """Test that /ready always returns exactly db, chroma, voyage keys."""
-    response = api_client.get("/ready")
-    data = response.json()
-    checks = data["checks"]
-    
-    # Must have exactly these three keys
-    assert set(checks.keys()) == {"db", "chroma", "voyage"}
-    # Each value must be a string
-    for value in checks.values():
-        assert isinstance(value, str)
+    elapsed_s = end_time - start_time
+    assert elapsed_s < 2, f"Response time {elapsed_s:.2f}s exceeds 2s limit"
+    assert response.status_code in [200, 503]  # Can be either depending on health

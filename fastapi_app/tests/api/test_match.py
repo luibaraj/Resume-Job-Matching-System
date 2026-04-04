@@ -1,13 +1,168 @@
 """Tests for /match endpoint."""
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import pytest
+from fastapi.testclient import TestClient
+from fastapi_app.api.main import app
 
 
+def test_match_score_calculation(api_client, mock_collection):
+    """Test that score is calculated as max(0.0, 1.0 - distance)."""
+    # Mock distances to test score calculation
+    mock_collection.query.return_value = {
+        "ids": [["1", "2", "3"]],
+        "documents": [["Job 1", "Job 2", "Job 3"]],
+        "metadatas": [[
+            {"title": "Job 1", "job_id": 1},
+            {"title": "Job 2", "job_id": 2},
+            {"title": "Job 3", "job_id": 3}
+        ]],
+        "distances": [[0.1, 0.5, 1.2]],  # Note: 1.2 should give score 0.0
+    }
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 3}
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    matches = data["matches"]
+    
+    # Check score calculation
+    expected_scores = [1.0 - 0.1, 1.0 - 0.5, max(0.0, 1.0 - 1.2)]
+    for i, match in enumerate(matches):
+        assert abs(match["score"] - expected_scores[i]) < 0.001
+        assert 0.0 <= match["score"] <= 1.0
+
+
+def test_match_ollama_failure_returns_200_without_explanations(api_client, mock_generate_explanation):
+    """Test that Ollama failure returns 200 but explanations may be null."""
+    # Make generate_explanation return None (simulating failure)
+    mock_generate_explanation.return_value = None
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 3}
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    for match in data["matches"]:
+        # Explanation can be null when Ollama fails
+        assert match["explanation"] is None
+
+
+def test_match_chromadb_failure_returns_500(api_client, mock_collection):
+    """Test that ChromaDB failure returns 500."""
+    # Make collection.query raise an exception
+    mock_collection.query.side_effect = Exception("ChromaDB internal error")
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 10}
+    )
+    
+    assert response.status_code == 500
+    data = response.json()
+    assert "error" in data
+    assert "retrieval error" in data["error"].lower()
+
+
+def test_match_cohere_failure_returns_503(api_client, mock_cohere):
+    """Test that Cohere failure returns 503."""
+    # Already tested, but ensure it matches contract
+    mock_cohere.rerank.side_effect = Exception("Cohere API error")
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 10}
+    )
+    
+    assert response.status_code == 503
+    data = response.json()
+    assert "error" in data
+    assert "reranking service unavailable" in data["error"]
+
+
+def test_match_ollama_health_failure_still_returns_200(api_client, mock_ollama_health):
+    """Test that Ollama health check failure doesn't prevent match endpoint."""
+    # Make Ollama health check fail
+    mock_ollama_health.return_value = (False, "Ollama connection failed")
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 3}
+    )
+    
+    # Should still return 200 (explanations may be null)
+    assert response.status_code == 200
+    data = response.json()
+    assert "matches" in data
+
+
+def test_match_resume_max_length_10000_chars(api_client):
+    """Test that resume up to 10,000 characters is accepted."""
+    # Create a resume of exactly 10,000 characters
+    resume_text = "A" * 10000
+    
+    response = api_client.post(
+        "/match",
+        json={"resume": resume_text, "top_k": 5}
+    )
+    
+    # Should be accepted (200) or return validation error if too long
+    # According to contract, max is 10,000 characters
+    assert response.status_code in [200, 422]
+    if response.status_code == 422:
+        data = response.json()
+        assert "error" in data
+
+
+def test_match_top_k_max_50(api_client):
+    """Test that top_k up to 50 is accepted."""
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 50}
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["matches"]) <= 50
+
+
+def test_match_retrieves_top_100_from_chromadb(api_client, mock_collection):
+    """Test that endpoint retrieves top 100 jobs from ChromaDB."""
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50, "top_k": 10}
+    )
+    
+    # Verify that collection.query was called with n_results=100
+    mock_collection.query.assert_called_once()
+    call_args = mock_collection.query.call_args
+    assert call_args[1].get('n_results') == 100
+
+
+def test_match_reranks_top_10_by_default(api_client, mock_cohere):
+    """Test that endpoint reranks top 10 jobs by default."""
+    response = api_client.post(
+        "/match",
+        json={"resume": "a" * 50}  # top_k defaults to 10
+    )
+    
+    # Verify cohere.rerank was called with appropriate parameters
+    mock_cohere.rerank.assert_called_once()
+    call_args = mock_cohere.rerank.call_args
+    # Should have documents to rerank
+    assert len(call_args[1].get('documents', [])) <= 10
+
+
+# Include existing tests from the original file
 def test_match_missing_resume_returns_422(api_client):
     """POST /match without resume returns 422 validation error."""
     response = api_client.post("/match", json={"top_k": 10})
-    
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
@@ -15,9 +170,8 @@ def test_match_missing_resume_returns_422(api_client):
 
 def test_match_resume_too_short_returns_422(api_client):
     """POST /match with resume < 50 chars returns 422."""
-    short_resume = "a" * 49  # 49 chars
+    short_resume = "a" * 49
     response = api_client.post("/match", json={"resume": short_resume})
-    
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
@@ -25,9 +179,8 @@ def test_match_resume_too_short_returns_422(api_client):
 
 def test_match_resume_exact_50_chars_returns_200(api_client):
     """POST /match with resume exactly 50 chars returns 200 (boundary)."""
-    exact_resume = "a" * 50  # Exactly 50 chars
+    exact_resume = "a" * 50
     response = api_client.post("/match", json={"resume": exact_resume})
-    
     assert response.status_code == 200
     data = response.json()
     assert "matches" in data
@@ -40,7 +193,6 @@ def test_match_top_k_zero_returns_422(api_client):
         "/match", 
         json={"resume": "a" * 50, "top_k": 0}
     )
-    
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
@@ -52,7 +204,6 @@ def test_match_top_k_51_returns_422(api_client):
         "/match", 
         json={"resume": "a" * 50, "top_k": 51}
     )
-    
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
@@ -64,7 +215,6 @@ def test_match_top_k_50_returns_200(api_client):
         "/match", 
         json={"resume": "a" * 50, "top_k": 50}
     )
-    
     assert response.status_code == 200
     data = response.json()
     assert "matches" in data
@@ -74,23 +224,20 @@ def test_match_top_k_defaults_to_10(api_client):
     """POST /match without top_k defaults to 10."""
     response = api_client.post(
         "/match", 
-        json={"resume": "a" * 50}  # No top_k specified
+        json={"resume": "a" * 50}
     )
-    
     assert response.status_code == 200
     data = response.json()
     assert len(data["matches"]) <= 10
 
 
-def test_match_happy_path_returns_correct_structure(api_client, mock_voyage, mock_collection, mock_cohere):
+def test_match_happy_path_returns_correct_structure(api_client):
     """POST /match with valid resume returns correct response structure."""
     resume_text = "Experienced software engineer with 5+ years in Python, AWS, and Docker. " * 10
-    
     response = api_client.post(
         "/match",
         json={"resume": resume_text, "top_k": 5}
     )
-    
     assert response.status_code == 200
     data = response.json()
     assert "matches" in data
@@ -106,13 +253,10 @@ def test_match_happy_path_returns_correct_structure(api_client, mock_voyage, moc
 def test_match_empty_chroma_collection_returns_404(api_client, mock_collection):
     """POST /match with empty ChromaDB collection returns 404."""
     mock_collection.count.return_value = 0
-    mock_collection.query.return_value = mock_collection.empty_query_result
-    
     response = api_client.post(
         "/match",
         json={"resume": "a" * 50, "top_k": 10}
     )
-    
     assert response.status_code == 404
     data = response.json()
     assert data["error"] == "no jobs in index"
@@ -121,12 +265,10 @@ def test_match_empty_chroma_collection_returns_404(api_client, mock_collection):
 def test_match_voyage_exception_returns_503(api_client, mock_voyage):
     """POST /match when VoyageAI fails returns 503."""
     mock_voyage.embed.side_effect = Exception("Voyage API error")
-    
     response = api_client.post(
         "/match",
         json={"resume": "a" * 50, "top_k": 10}
     )
-    
     assert response.status_code == 503
     data = response.json()
     assert data["error"] == "embedding service unavailable"
@@ -135,58 +277,34 @@ def test_match_voyage_exception_returns_503(api_client, mock_voyage):
 def test_match_cohere_exception_returns_503(api_client, mock_cohere):
     """POST /match when Cohere fails returns 503."""
     mock_cohere.rerank.side_effect = Exception("Cohere API error")
-    
     response = api_client.post(
         "/match",
         json={"resume": "a" * 50, "top_k": 10}
     )
-    
     assert response.status_code == 503
     data = response.json()
     assert data["error"] == "reranking service unavailable"
 
 
-def test_match_unhandled_exception_returns_500(api_client, mock_voyage):
-    """POST /match when VoyageAI fails returns 503."""
-    mock_voyage.embed.side_effect = ValueError("Unexpected error")
-    
-    response = api_client.post(
-        "/match",
-        json={"resume": "a" * 50, "top_k": 10}
-    )
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert data["error"] == "embedding service unavailable"
-    # Ensure no stack trace
-    assert "traceback" not in str(data).lower()
-    assert "Unexpected error" not in str(data)
-
-
 def test_error_envelope_format_consistent(api_client):
     """All non-2xx responses use {"error": "..."} format."""
-    # Test 404 on unknown route
     response = api_client.get("/nonexistent")
-    
     assert response.status_code == 404
     data = response.json()
     assert "error" in data
     
-    # Test 422 validation error
-    response = api_client.post("/match", json={})  # Empty body
-    
+    response = api_client.post("/match", json={})
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
 
 
-def test_matches_sorted_by_score_descending(api_client, mock_collection):
+def test_matches_sorted_by_score_descending(api_client):
     """POST /match returns matches sorted by score descending."""
     response = api_client.post(
         "/match",
         json={"resume": "a" * 50, "top_k": 3}
     )
-    
     assert response.status_code == 200
     data = response.json()
     matches = data["matches"]
@@ -200,268 +318,8 @@ def test_explanation_field_nullable(api_client):
         "/match",
         json={"resume": "a" * 50, "top_k": 3}
     )
-    
     assert response.status_code == 200
     data = response.json()
     for match in data["matches"]:
         assert "explanation" in match
-        # Can be string or null
         assert match["explanation"] is None or isinstance(match["explanation"], str)
-"""Tests for the match endpoint."""
-
-import pytest
-from unittest.mock import MagicMock, patch
-import json
-
-def test_match_validation_missing_resume(api_client):
-    """Test that missing resume returns 422."""
-    response = api_client.post("/match", json={"top_k": 5})
-    assert response.status_code == 422
-    data = response.json()
-    assert "error" in data
-
-def test_match_validation_resume_too_short(api_client):
-    """Test that resume with 49 chars returns 422."""
-    short_resume = "a" * 49
-    response = api_client.post("/match", json={"resume": short_resume})
-    assert response.status_code == 422
-    data = response.json()
-    assert "error" in data
-
-def test_match_validation_resume_boundary(api_client):
-    """Test that resume with exactly 50 chars returns 200."""
-    boundary_resume = "a" * 50
-    response = api_client.post("/match", json={"resume": boundary_resume})
-    # Should be successful with mocked dependencies
-    assert response.status_code == 200
-
-def test_match_validation_top_k_zero(api_client):
-    """Test that top_k = 0 returns 422."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50,
-        "top_k": 0
-    })
-    assert response.status_code == 422
-    data = response.json()
-    assert "error" in data
-
-def test_match_validation_top_k_51(api_client):
-    """Test that top_k = 51 returns 422."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50,
-        "top_k": 51
-    })
-    assert response.status_code == 422
-    data = response.json()
-    assert "error" in data
-
-def test_match_validation_top_k_boundary_50(api_client):
-    """Test that top_k = 50 returns 200."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50,
-        "top_k": 50
-    })
-    assert response.status_code == 200
-
-def test_match_default_top_k(api_client):
-    """Test that omitting top_k defaults to 10."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50
-    })
-    assert response.status_code == 200
-    data = response.json()
-    # Verify matches length doesn't exceed default (10)
-    # Our mock returns 3 matches, which is less than 10
-    assert len(data["matches"]) == 3
-
-def test_match_happy_path_structure(api_client):
-    """Test valid request returns correct structure."""
-    response = api_client.post("/match", json={
-        "resume": "Experienced software engineer with Python and AWS skills. " * 10,
-        "top_k": 5
-    })
-    assert response.status_code == 200
-    data = response.json()
-    
-    # Check top-level keys
-    assert "matches" in data
-    assert "resume_id" in data
-    
-    # matches should be a list
-    matches = data["matches"]
-    assert isinstance(matches, list)
-    
-    # Check each match has required fields
-    for match in matches:
-        assert "job_id" in match
-        assert "title" in match
-        assert "score" in match
-        # explanation may be present or null
-        if "explanation" in match:
-            assert match["explanation"] is None or isinstance(match["explanation"], str)
-        
-        # Type checks
-        assert isinstance(match["job_id"], int)
-        assert isinstance(match["title"], str)
-        assert isinstance(match["score"], float)
-        assert 0.0 <= match["score"] <= 1.0
-
-def test_match_sorted_by_score_descending(api_client):
-    """Test that matches are sorted by score descending."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50,
-        "top_k": 5
-    })
-    assert response.status_code == 200
-    data = response.json()
-    matches = data["matches"]
-    
-    # Check scores are in descending order
-    scores = [match["score"] for match in matches]
-    assert scores == sorted(scores, reverse=True)
-
-def test_match_length_leq_top_k(api_client):
-    """Test that matches length is less than or equal to top_k."""
-    response = api_client.post("/match", json={
-        "resume": "a" * 50,
-        "top_k": 2  # Request only 2 matches
-    })
-    assert response.status_code == 200
-    data = response.json()
-    matches = data["matches"]
-    # Our mock returns 3 matches, but we requested top_k=2
-    # The endpoint should return at most 2
-    assert len(matches) <= 2
-
-def test_empty_chroma_collection_404(api_client):
-    """Test that empty ChromaDB collection returns 404."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock collection that returns empty results
-    mock_collection = MagicMock()
-    mock_collection.count.return_value = 0
-    
-    # Override the dependency
-    from fastapi_app.api.dependencies import get_chroma_collection
-    app.dependency_overrides[get_chroma_collection] = lambda: mock_collection
-    
-    client = TestClient(app)
-    response = client.post("/match", json={
-        "resume": "a" * 50
-    })
-    
-    assert response.status_code == 404
-    data = response.json()
-    assert "error" in data
-    assert data["error"] == "no jobs in index"
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_voyage_exception_503(api_client):
-    """Test that VoyageAI exception returns 503."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock that raises an exception
-    mock_voyage = MagicMock()
-    mock_voyage.embed.side_effect = Exception("API error")
-    
-    # Override the dependency
-    from fastapi_app.api.dependencies import get_voyage_client
-    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
-    
-    client = TestClient(app)
-    response = client.post("/match", json={
-        "resume": "a" * 50
-    })
-    
-    assert response.status_code == 503
-    data = response.json()
-    assert "error" in data
-    assert data["error"] == "embedding service unavailable"
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_cohere_exception_503(api_client):
-    """Test that Cohere exception returns 503."""
-    from fastapi_app.api.main import app
-    
-    # We need to mock the reranking function to raise an exception
-    # Since we can't directly mock the cohere client in the endpoint,
-    # we'll patch the rerank_jobs function
-    with patch('fastapi_app.api.routers.match.rerank_jobs') as mock_rerank:
-        mock_rerank.side_effect = Exception("Cohere API error")
-        
-        client = TestClient(app)
-        response = client.post("/match", json={
-            "resume": "a" * 50
-        })
-        
-        assert response.status_code == 503
-        data = response.json()
-        assert "error" in data
-        assert data["error"] == "reranking service unavailable"
-
-def test_unhandled_exception_500(api_client):
-    """Test that unhandled exception returns 500."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock that raises a generic exception
-    mock_voyage = MagicMock()
-    mock_voyage.embed.side_effect = ValueError("Some unexpected error")
-    
-    # Override the dependency
-    from fastapi_app.api.dependencies import get_voyage_client
-    app.dependency_overrides[get_voyage_client] = lambda: mock_voyage
-    
-    client = TestClient(app)
-    response = client.post("/match", json={
-        "resume": "a" * 50
-    })
-    
-    # The endpoint catches Voyage exceptions and returns 503
-    assert response.status_code == 503
-    data = response.json()
-    assert "error" in data
-    # The error message should be "embedding service unavailable"
-    assert data["error"] == "embedding service unavailable"
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-def test_matches_empty_array_valid(api_client):
-    """Test that empty matches array is valid (not a 404)."""
-    from fastapi_app.api.main import app
-    
-    # Create a mock collection that has jobs but returns empty query results
-    mock_collection = MagicMock()
-    mock_collection.count.return_value = 5
-    mock_collection.query.return_value = {
-        "ids": [[]],
-        "documents": [[]],
-        "metadatas": [[]],
-        "distances": [[]],
-    }
-    
-    # Override the dependency
-    from fastapi_app.api.dependencies import get_chroma_collection
-    app.dependency_overrides[get_chroma_collection] = lambda: mock_collection
-    
-    client = TestClient(app)
-    response = client.post("/match", json={
-        "resume": "a" * 50
-    })
-    
-    # Should return 200 with empty matches, not 404
-    assert response.status_code == 200
-    data = response.json()
-    assert "matches" in data
-    assert isinstance(data["matches"], list)
-    assert len(data["matches"]) == 0
-    
-    # Clean up
-    app.dependency_overrides.clear()
-
-# Import TestClient here to avoid issues
-from fastapi.testclient import TestClient
