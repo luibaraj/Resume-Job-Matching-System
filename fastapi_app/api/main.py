@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Job Matcher", lifespan=lifespan)
 
-# Register exception handlers
+# Register exception handlers 
 app.add_exception_handler(RequestValidationError, errors.validation_exception_handler)
 app.add_exception_handler(StarletteHTTPException, errors.http_exception_handler)
 app.add_exception_handler(Exception, errors.unhandled_exception_handler)
