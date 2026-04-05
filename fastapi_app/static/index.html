@@ -191,6 +191,13 @@
             color: #333;
         }
 
+        .match-company {
+            font-size: 0.95em;
+            color: #999;
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
         .match-score {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -346,7 +353,10 @@
                         ${matches.map(match => `
                             <div class="match-card">
                                 <div class="match-header">
-                                    <div class="match-title">${escapeHtml(match.title)}</div>
+                                    <div>
+                                        <div class="match-title">${escapeHtml(match.title)}</div>
+                                        ${match.company_name ? `<div class="match-company">${escapeHtml(match.company_name)}</div>` : ''}
+                                    </div>
                                     <div class="match-score">${(match.score * 100).toFixed(1)}%</div>
                                 </div>
                                 ${match.explanation ? `

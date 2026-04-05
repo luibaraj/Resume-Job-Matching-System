@@ -7,6 +7,7 @@ class MatchRequest(BaseModel):
 class JobMatch(BaseModel):
     job_id: int
     title: str
+    company_name: str = ""
     score: float
     explanation: str | None = None
 

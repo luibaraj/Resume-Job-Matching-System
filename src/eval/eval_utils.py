@@ -22,7 +22,7 @@ from src.config import (
     REPAIR_MAX_TOKENS,
     VALIDATION_MAX_TOKENS,
 )
-from src.eval.positive_gen.positives_gen import JobSkeleton
+from src.eval.types import JobSkeleton
 
 logger = logging.getLogger(__name__)
 

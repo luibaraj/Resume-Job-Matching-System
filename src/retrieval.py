@@ -40,6 +40,7 @@ class JobResult(TypedDict):
     id: str
     distance: float
     title: str
+    company_name: str
     location: str
     source_url: str
     board_token: str
@@ -87,7 +88,7 @@ def build_collection(
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, title, location, source_url, board_token, cleaned_description, embedding
+        SELECT id, title, company_name, location, source_url, board_token, cleaned_description, embedding
         FROM jobs
         WHERE embedded = 1 AND embedding IS NOT NULL
         """
@@ -115,6 +116,7 @@ def build_collection(
             metadatas.append(
                 {
                     "title": row["title"] or "",
+                    "company_name": row["company_name"] or "",
                     "location": row["location"] or "",
                     "source_url": row["source_url"] or "",
                     "board_token": row["board_token"] or "",
@@ -209,6 +211,8 @@ def query_collection(
         # Extract string fields with safe defaults
         title_val = meta.get("title")
         title: str = str(title_val) if title_val else ""
+        company_name_val = meta.get("company_name")
+        company_name: str = str(company_name_val) if company_name_val else ""
         location_val = meta.get("location")
         location: str = str(location_val) if location_val else ""
         source_url_val = meta.get("source_url")
@@ -231,6 +235,7 @@ def query_collection(
                 id=doc_id,
                 distance=float(dist),
                 title=title,
+                company_name=company_name,
                 location=location,
                 source_url=source_url,
                 board_token=board_token,

@@ -15,8 +15,12 @@ echo "Ollama ready"
 docker-compose up -d
 
 # Wait for app to be healthy
-echo "Waiting for app to be healthy..."
-docker-compose ps
+echo "Waiting for app..."
+until curl -sf http://localhost:8000/health >/dev/null 2>&1; do sleep 2; done
+echo "App ready"
+
+# Open the UI in the default browser
+open http://localhost:8000 2>/dev/null || xdg-open http://localhost:8000 2>/dev/null || true
 
 echo "Services started successfully!"
 echo "App available at http://localhost:8000"

@@ -151,6 +151,7 @@ async def match(
             JobMatch(
                 job_id=job_id,
                 title=job.get('title', ''),
+                company_name=job.get('company_name', ''),
                 score=score,
                 explanation=explanation
             )

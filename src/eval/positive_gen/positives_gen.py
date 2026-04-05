@@ -21,9 +21,11 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 
 import ollama
+
+from src.eval.types import JobSkeleton
 
 # Allow running as a script from any working directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -56,16 +58,8 @@ def _parse_years_required(years_str: str) -> int:
     return _parse(years_str)
 
 
-class JobSkeleton(TypedDict):
-    """Parsed output from the job skeleton LLM call."""
-
-    title: str
-    seniority: str
-    years_required: str  # Raw string (e.g., "4-6"); not converted to int
-    domain: str  # backend/frontend/fullstack/data
-    primary_skills: list[str]  # Parsed from comma-separated string
-    secondary_skills: list[str]
-    responsibilities: list[str]  # 3–5 bullet-point responsibilities
+# Re-export JobSkeleton for backwards compatibility
+__all__ = ["JobSkeleton"]
 
 
 def _call_ollama(

@@ -1,9 +1,10 @@
 """
 TypedDict definitions shared across evaluation modules.
 
-Houses the two core TypedDicts used by evaluation logic and reporting:
+Houses the core TypedDicts used by evaluation logic and reporting:
 - PositiveRetrievalStatus: tracks how a single synthetic positive was retrieved/ranked
 - ResumeEvalResult: evaluation metrics and retrieval details for a single resume
+- JobSkeleton: structured job posting data used in generation and validation
 """
 
 from typing import Optional, TypedDict
@@ -39,3 +40,13 @@ class ResumeEvalResult(TypedDict):
     recall_at_10: float
     num_positives: int
     positives: list[PositiveRetrievalStatus]
+
+
+class JobSkeleton(TypedDict):
+    title: str
+    seniority: str
+    years_required: str
+    domain: str
+    primary_skills: list[str]
+    secondary_skills: list[str]
+    responsibilities: list[str]
