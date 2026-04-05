@@ -22,8 +22,8 @@ from dotenv import load_dotenv
 
 # Ensure src/ can be imported from any working directory
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(_PROJECT_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.config import (
     CHROMA_COLLECTION_NAME,
@@ -37,12 +37,14 @@ from src.config import (
     RERANK_TOP_N,
 )
 from src.embedding import create_client, embed_batch
+from src.llm_extraction import (
+    extract_degree_with_llm,
+    extract_seniority_with_llm,
+    extract_years_with_llm,
+)
 from src.regex_extraction import (
     build_chroma_where_filter,
     describe_chroma_filter,
-    extract_user_degree,
-    extract_user_seniority,
-    extract_user_years_experience,
     extract_years_experience,
 )
 from src.retrieval import build_collection, query_collection
@@ -94,9 +96,9 @@ def extract_user_filters(resume_text: str):
     Returns:
         A ChromaDB where filter dict, or None if no criteria could be extracted.
     """
-    user_degree = extract_user_degree(resume_text)
-    user_seniority = extract_user_seniority(resume_text)
-    user_years = extract_user_years_experience(resume_text)
+    user_degree = extract_degree_with_llm(resume_text, OLLAMA_MODEL)
+    user_seniority = extract_seniority_with_llm(resume_text, OLLAMA_MODEL)
+    user_years = extract_years_with_llm(resume_text, OLLAMA_MODEL)
 
     logger.info(
         "User profile — degree: %d, seniority: %d, years: %d",
@@ -329,7 +331,7 @@ def main() -> None:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="Rebuild ChromaDB collection (clears old embeddings)",
+        help="Rebuild the Chroma vector store from scratch.",
     )
     args = parser.parse_args()
 

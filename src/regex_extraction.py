@@ -7,6 +7,7 @@ simply skips a filter condition; a false positive could incorrectly exclude good
 """
 
 import re
+import warnings
 from typing import Optional
 
 from src.config import (
@@ -208,6 +209,11 @@ def extract_user_degree(resume_text: str) -> int:
     Returns:
         DEGREE_* constant.
     """
+    warnings.warn(
+        "extract_user_degree is deprecated. Use llm_extraction.extract_degree_with_llm instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return extract_degree_requirement(resume_text)
 
 
@@ -224,6 +230,11 @@ def extract_user_seniority(resume_text: str) -> int:
     Returns:
         SENIORITY_* constant.
     """
+    warnings.warn(
+        "extract_user_seniority is deprecated. Use llm_extraction.extract_seniority_with_llm instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not resume_text:
         return SENIORITY_UNKNOWN
 
@@ -251,6 +262,11 @@ def extract_user_years_experience(resume_text: str) -> int:
     Returns:
         Minimum years found as int, or YEARS_UNKNOWN (-1).
     """
+    warnings.warn(
+        "extract_user_years_experience is deprecated. Use llm_extraction.extract_years_with_llm instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not resume_text:
         return YEARS_UNKNOWN
 

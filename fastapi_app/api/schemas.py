@@ -14,3 +14,4 @@ class JobMatch(BaseModel):
 class MatchResponse(BaseModel):
     matches: list[JobMatch]
     resume_id: str | None = None  # hash of resume for caching later
+    corpus_warning: str | None = None  # NEW: warning about corpus limitations
