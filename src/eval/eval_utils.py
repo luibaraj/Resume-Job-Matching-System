@@ -15,14 +15,14 @@ import ollama
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import (
+from src.config import (
     GENERATION_TEMPERATURE,
     GENERATION_TOP_P,
     OLLAMA_MODEL,
     REPAIR_MAX_TOKENS,
     VALIDATION_MAX_TOKENS,
 )
-from eval.positive_gen.positives_gen import JobSkeleton
+from src.eval.positive_gen.positives_gen import JobSkeleton
 
 logger = logging.getLogger(__name__)
 

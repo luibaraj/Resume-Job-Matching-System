@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import config
-import embedding
-from eval import eval_config
+from src import config
+from src import embedding
+from src.eval import eval_config
 
 logger = logging.getLogger(__name__)
 

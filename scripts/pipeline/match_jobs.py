@@ -25,7 +25,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
-from config import (
+from src.config import (
     CHROMA_COLLECTION_NAME,
     CHROMA_DEFAULT_DIR,
     CORPUS_LIMITATION_MESSAGE,
@@ -36,8 +36,8 @@ from config import (
     RETRIEVE_TOP_K,
     RERANK_TOP_N,
 )
-from embedding import create_client, embed_batch
-from regex_extraction import (
+from src.embedding import create_client, embed_batch
+from src.regex_extraction import (
     build_chroma_where_filter,
     describe_chroma_filter,
     extract_user_degree,
@@ -45,11 +45,11 @@ from regex_extraction import (
     extract_user_years_experience,
     extract_years_experience,
 )
-from retrieval import build_collection, query_collection
-from reranking import rerank_jobs
+from src.retrieval import build_collection, query_collection
+from src.reranking import rerank_jobs
 
 import ollama
-from generation import run_generation_pipeline
+from src.generation import run_generation_pipeline
 
 logger = logging.getLogger(__name__)
 

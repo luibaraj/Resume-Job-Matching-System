@@ -16,15 +16,15 @@ import ollama
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from config import (
+from src.config import (
     GENERATION_TEMPERATURE,
     GENERATION_TOP_P,
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
-from eval.eval_utils import call_ollama_validate
-from eval.positive_gen.positives_gen import JobSkeleton
-from eval.positive_gen.positives_validate import (
+from src.eval.eval_utils import call_ollama_validate
+from src.eval.positive_gen.positives_gen import JobSkeleton
+from src.eval.positive_gen.positives_validate import (
     ResumeInfo,
     ValidationResult,
     _normalize_skeleton,

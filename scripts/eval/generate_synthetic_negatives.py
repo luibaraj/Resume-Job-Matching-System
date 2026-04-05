@@ -34,17 +34,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ollama
 
-from config import OLLAMA_MODEL
-from eval.negative_gen.negatives_gen import (
+from src.config import OLLAMA_MODEL
+from src.eval.negative_gen.negatives_gen import (
     generate_mismatched_skeleton,
     MismatchType,
 )
-from eval.negative_gen.negatives_validate import validate_mismatched_skeleton
-from eval.negative_gen.negatives_repair import repair_mismatched_skeleton
-from eval.positive_gen.positives_validate import ResumeInfo
+from src.eval.negative_gen.negatives_validate import validate_mismatched_skeleton
+from src.eval.negative_gen.negatives_repair import repair_mismatched_skeleton
+from src.eval.positive_gen.positives_validate import ResumeInfo
 
 # Reuse helpers from the positives script
-from generate_synthetic_positives import (
+from scripts.eval.generate_synthetic_positives import (
     extract_skills_from_resume,
     build_resume_info,
     format_job_for_embedding,

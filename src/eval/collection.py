@@ -12,10 +12,10 @@ import chromadb
 import numpy as np
 import pandas as pd
 
-import config
-import embedding
-import regex_extraction
-from eval import data_loading, eval_config
+from src import config
+from src import embedding
+from src import regex_extraction
+from src.eval import data_loading, eval_config
 
 logger = logging.getLogger(__name__)
 

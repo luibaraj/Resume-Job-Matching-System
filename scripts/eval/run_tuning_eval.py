@@ -32,7 +32,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 import mlflow
-from config import (
+from src.config import (
     DB_DEFAULT_PATH,
     HNSW_EF,
     HNSW_EF_CONSTRUCTION,
@@ -43,10 +43,10 @@ from config import (
     EMBEDDING_DIM,
     COHERE_RERANK_MODEL,
 )
-from embedding import create_client
-from eval.collection import get_or_build_tune_collection, swap_positives
-from eval.embedding_cache import embed_positives, embed_resumes
-from eval.eval_config import (
+from src.embedding import create_client
+from src.eval.collection import get_or_build_tune_collection, swap_positives
+from src.eval.embedding_cache import embed_positives, embed_resumes
+from src.eval.eval_config import (
     K_PRECISION,
     K_RECALL,
     RESULTS_DIR,
@@ -57,12 +57,12 @@ from eval.eval_config import (
     MLFLOW_EXPERIMENT_NAME,
     MLFLOW_TRACKING_URI,
 )
-from eval.data_loading import sample_jobs
-from eval.metrics import batch_compute_metrics_at_k, compute_metrics_at_k
-from eval.reporting import write_missed_positives_csv, write_results_json
-from eval.types import PositiveRetrievalStatus, ResumeEvalResult
-from reranking import batch_rerank_jobs, create_rerank_client
-from retrieval import JobResult, query_collection
+from src.eval.data_loading import sample_jobs
+from src.eval.metrics import batch_compute_metrics_at_k, compute_metrics_at_k
+from src.eval.reporting import write_missed_positives_csv, write_results_json
+from src.eval.types import PositiveRetrievalStatus, ResumeEvalResult
+from src.reranking import batch_rerank_jobs, create_rerank_client
+from src.retrieval import JobResult, query_collection
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ import ollama
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from config import OLLAMA_MODEL
+from src.config import OLLAMA_MODEL
 from .positives_gen import JobSkeleton, generate_job_skeleton
 from .positives_validate import ResumeInfo, validate_job_skeleton
 from .positives_repair import repair_job_skeleton
