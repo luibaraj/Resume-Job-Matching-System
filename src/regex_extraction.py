@@ -6,8 +6,8 @@ rather than risk filtering out valid candidates. A false negative (missing a val
 simply skips a filter condition; a false positive could incorrectly exclude good matches.
 """
 
+import logging
 import re
-import warnings
 from typing import Optional
 
 from src.config import (
@@ -20,6 +20,7 @@ from src.config import (
     SENIORITY_SENIOR,
     SENIORITY_UNKNOWN,
     YEARS_UNKNOWN,
+    OLLAMA_MODEL,
 )
 
 # ===== Degree requirement patterns =====
@@ -127,6 +128,38 @@ def extract_degree_requirement(text: str) -> int:
     return DEGREE_UNKNOWN
 
 
+def extract_degree_with_fallback(text: str, model: str = OLLAMA_MODEL) -> int:
+    """Extract degree requirement with LLM fallback when regex returns UNKNOWN.
+    
+    Args:
+        text: Cleaned plain-text job description.
+        model: Ollama model name.
+        
+    Returns:
+        DEGREE_PHD (3), DEGREE_MASTER (2), DEGREE_BACHELOR (1), or DEGREE_UNKNOWN (0).
+    """
+    result = extract_degree_requirement(text)
+    if result != DEGREE_UNKNOWN:
+        return result
+    try:
+        from src.generation import _call_ollama
+        prompt = (
+            "Extract the minimum required degree from this job description. "
+            "Reply with exactly one word: PhD, Master, Bachelor, or Unknown.\n\n"
+            + text[:2000]
+        )
+        raw = _call_ollama(prompt, model=model).strip().lower()
+        if "phd" in raw or "doctorate" in raw:
+            return DEGREE_PHD
+        if "master" in raw:
+            return DEGREE_MASTER
+        if "bachelor" in raw:
+            return DEGREE_BACHELOR
+    except Exception:
+        logging.warning("LLM degree fallback failed")
+    return DEGREE_UNKNOWN
+
+
 def extract_seniority_level(text: str) -> int:
     """
     Extract seniority level from a job description.
@@ -168,6 +201,38 @@ def extract_seniority_from_title(title: str) -> int:
     return extract_seniority_level(title)
 
 
+def extract_seniority_with_fallback(text: str, model: str = OLLAMA_MODEL) -> int:
+    """Extract seniority level with LLM fallback when regex returns UNKNOWN.
+    
+    Args:
+        text: Cleaned plain-text job description.
+        model: Ollama model name.
+        
+    Returns:
+        SENIORITY_SENIOR (3), SENIORITY_MID (2), SENIORITY_ENTRY (1), or SENIORITY_UNKNOWN (0).
+    """
+    result = extract_seniority_level(text)
+    if result != SENIORITY_UNKNOWN:
+        return result
+    try:
+        from src.generation import _call_ollama
+        prompt = (
+            "Extract the seniority level from this job description. "
+            "Reply with exactly one word: Senior, Mid, Entry, or Unknown.\n\n"
+            + text[:2000]
+        )
+        raw = _call_ollama(prompt, model=model).strip().lower()
+        if "senior" in raw or "staff" in raw or "principal" in raw:
+            return SENIORITY_SENIOR
+        if "mid" in raw or "intermediate" in raw:
+            return SENIORITY_MID
+        if "entry" in raw or "junior" in raw or "associate" in raw:
+            return SENIORITY_ENTRY
+    except Exception:
+        logging.warning("LLM seniority fallback failed")
+    return SENIORITY_UNKNOWN
+
+
 def extract_years_experience(text: str) -> int:
     """
     Extract minimum years of experience required from a job description.
@@ -194,88 +259,35 @@ def extract_years_experience(text: str) -> int:
     return min(found) if found else YEARS_UNKNOWN
 
 
-# ===== Resume text extraction =====
-
-
-def extract_user_degree(resume_text: str) -> int:
-    """
-    Extract degree level from resume text.
-
-    Reuses the same patterns as job descriptions.
-
+def extract_years_with_fallback(text: str, model: str = OLLAMA_MODEL) -> int:
+    """Extract minimum years of experience with LLM fallback when regex returns UNKNOWN.
+    
     Args:
-        resume_text: Full resume text.
-
+        text: Cleaned plain-text job description.
+        model: Ollama model name.
+        
     Returns:
-        DEGREE_* constant.
+        Minimum years found as int, or YEARS_UNKNOWN (-1) if none found.
     """
-    warnings.warn(
-        "extract_user_degree is deprecated. Use llm_extraction.extract_degree_with_llm instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return extract_degree_requirement(resume_text)
-
-
-def extract_user_seniority(resume_text: str) -> int:
-    """
-    Extract seniority level from resume's SENIORITY LEVEL section.
-
-    Extracts and searches the `== SENIORITY LEVEL ==` section if present;
-    falls back to full-text scan if section not found.
-
-    Args:
-        resume_text: Full resume text.
-
-    Returns:
-        SENIORITY_* constant.
-    """
-    warnings.warn(
-        "extract_user_seniority is deprecated. Use llm_extraction.extract_seniority_with_llm instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not resume_text:
-        return SENIORITY_UNKNOWN
-
-    section_match = _RESUME_SENIORITY_SECTION_RE.search(resume_text)
-    search_text = section_match.group(1) if section_match else resume_text
-
-    if _SENIORITY_SENIOR_RE.search(search_text):
-        return SENIORITY_SENIOR
-    if _SENIORITY_MID_RE.search(search_text):
-        return SENIORITY_MID
-    if _SENIORITY_ENTRY_RE.search(search_text):
-        return SENIORITY_ENTRY
-    return SENIORITY_UNKNOWN
-
-
-def extract_user_years_experience(resume_text: str) -> int:
-    """
-    Extract years of experience from resume text.
-
-    Scans the entire resume text for year patterns.
-
-    Args:
-        resume_text: Full resume text.
-
-    Returns:
-        Minimum years found as int, or YEARS_UNKNOWN (-1).
-    """
-    warnings.warn(
-        "extract_user_years_experience is deprecated. Use llm_extraction.extract_years_with_llm instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not resume_text:
-        return YEARS_UNKNOWN
-
-    found: list[int] = []
-    for pattern in (_YEARS_PLUS_RE, _YEARS_AT_LEAST_RE, _YEARS_OR_MORE_RE, _YEARS_RANGE_RE, _YEARS_OF_EXPERIENCE_RE):
-        for match in pattern.finditer(resume_text):
-            found.append(int(match.group(1)))
-
-    return min(found) if found else YEARS_UNKNOWN
+    result = extract_years_experience(text)
+    if result != YEARS_UNKNOWN:
+        return result
+    try:
+        from src.generation import _call_ollama
+        prompt = (
+            "Extract the minimum years of experience required from this job description. "
+            "Reply with a single integer (e.g. 3) or the word Unknown if not specified.\n\n"
+            + text[:2000]
+        )
+        raw = _call_ollama(prompt, model=model).strip().lower()
+        if raw != "unknown":
+            import re as _re
+            match = _re.search(r"\d+", raw)
+            if match:
+                return int(match.group())
+    except Exception:
+        logging.warning("LLM years fallback failed")
+    return YEARS_UNKNOWN
 
 
 # ===== Filter construction =====

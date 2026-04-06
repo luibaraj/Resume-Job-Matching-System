@@ -228,6 +228,7 @@ class GreenhouseScraper:
                 absolute_url=absolute_url,
                 department=department,
                 job_type=job_type,
+                company_name=job_data.get('company_name'),
             )
 
         except Exception as e:

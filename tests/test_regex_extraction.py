@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -24,12 +25,13 @@ from regex_extraction import (
     extract_degree_requirement,
     extract_seniority_from_title,
     extract_seniority_level,
-    extract_user_degree,
-    extract_user_seniority,
-    extract_user_years_experience,
     extract_years_experience,
+    extract_degree_with_fallback,
+    extract_seniority_with_fallback,
+    extract_years_with_fallback,
 )
 
+from llm_extraction import extract_degree_with_llm, extract_seniority_with_llm, extract_years_with_llm
 
 class TestExtractDegreeRequirement:
     """Test degree requirement extraction from job descriptions."""
@@ -219,92 +221,106 @@ class TestExtractYearsExperience:
         assert extract_years_experience("999+ years of experience") == YEARS_UNKNOWN
 
 
-class TestExtractUserDegree:
-    """Test degree extraction from resume text."""
+class TestExtractUserDegreeWithLLM:
+    """Test degree extraction from resume text using LLM."""
 
-    def test_extract_from_resume_with_degree(self):
-        """Degree is extracted from resume text."""
-        resume = "== EDUCATION ==\nDegree: B.S. in Computer Science"
-        assert extract_user_degree(resume) == DEGREE_BACHELOR
+    def test_llm_returns_bachelor(self):
+        """LLM returns 1 for bachelor degree."""
+        with patch("llm_extraction._call_ollama", return_value="1"):
+            result = extract_degree_with_llm("== EDUCATION ==\nB.S. in Computer Science", model="llama3.2")
+        assert result == DEGREE_BACHELOR
 
-    def test_extract_masters_from_resume(self):
-        """Master's degree is extracted from resume."""
-        resume = "== EDUCATION ==\nMaster's degree in Data Science"
-        assert extract_user_degree(resume) == DEGREE_MASTER
+    def test_llm_returns_master(self):
+        """LLM returns 2 for master degree."""
+        with patch("llm_extraction._call_ollama", return_value="2"):
+            result = extract_degree_with_llm("== EDUCATION ==\nMaster's degree in Data Science", model="llama3.2")
+        assert result == DEGREE_MASTER
 
-    def test_no_degree_in_resume(self):
-        """Returns DEGREE_UNKNOWN if no degree found."""
-        resume = "== EDUCATION ==\nHigh school diploma"
-        result = extract_user_degree(resume)
+    def test_llm_returns_phd(self):
+        """LLM returns 3 for PhD."""
+        with patch("llm_extraction._call_ollama", return_value="3"):
+            result = extract_degree_with_llm("== EDUCATION ==\nPhD in Computer Science", model="llama3.2")
+        assert result == DEGREE_PHD
+
+    def test_llm_failure_returns_unknown(self):
+        """LLM failure returns DEGREE_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", side_effect=Exception("timeout")):
+            result = extract_degree_with_llm("== EDUCATION ==\nB.S. in CS", model="llama3.2")
+        assert result == DEGREE_UNKNOWN
+
+    def test_llm_unknown_string_returns_unknown(self):
+        """LLM returns unknown string returns DEGREE_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", return_value="unknown"):
+            result = extract_degree_with_llm("== EDUCATION ==\nHigh school", model="llama3.2")
         assert result == DEGREE_UNKNOWN
 
 
-class TestExtractUserSeniority:
-    """Test seniority extraction from resume text."""
+class TestExtractUserSeniorityWithLLM:
+    """Test seniority extraction from resume text using LLM."""
 
-    def test_extract_from_seniority_section(self):
-        """Seniority is extracted from SENIORITY LEVEL section."""
-        resume = "== SENIORITY LEVEL ==\nNew Grad or Junior level"
-        assert extract_user_seniority(resume) == SENIORITY_ENTRY
+    def test_llm_returns_entry(self):
+        """LLM returns 1 for entry level."""
+        with patch("llm_extraction._call_ollama", return_value="1"):
+            result = extract_seniority_with_llm("== SENIORITY LEVEL ==\nNew Grad or Junior level", model="llama3.2")
+        assert result == SENIORITY_ENTRY
 
-    def test_extract_senior_from_seniority_section(self):
-        """Senior seniority extracted from section."""
-        resume = "== SENIORITY LEVEL ==\nSenior level professional"
-        assert extract_user_seniority(resume) == SENIORITY_SENIOR
+    def test_llm_returns_mid(self):
+        """LLM returns 2 for mid level."""
+        with patch("llm_extraction._call_ollama", return_value="2"):
+            result = extract_seniority_with_llm("Mid-level professional", model="llama3.2")
+        assert result == SENIORITY_MID
 
-    def test_fallback_to_full_text_if_no_section(self):
-        """Falls back to full-text scan if section not found."""
-        resume = "Senior engineer with 10+ years of experience"
-        assert extract_user_seniority(resume) == SENIORITY_SENIOR
+    def test_llm_returns_senior(self):
+        """LLM returns 3 for senior level."""
+        with patch("llm_extraction._call_ollama", return_value="3"):
+            result = extract_seniority_with_llm("== SENIORITY LEVEL ==\nSenior level professional", model="llama3.2")
+        assert result == SENIORITY_SENIOR
 
-    def test_no_seniority_in_resume(self):
-        """Returns SENIORITY_UNKNOWN if none found."""
-        resume = "== EDUCATION ==\nB.S. in Computer Science"
-        assert extract_user_seniority(resume) == SENIORITY_UNKNOWN
+    def test_llm_failure_returns_unknown(self):
+        """LLM failure returns SENIORITY_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", side_effect=Exception("timeout")):
+            result = extract_seniority_with_llm("Senior engineer", model="llama3.2")
+        assert result == SENIORITY_UNKNOWN
+
+    def test_llm_unknown_string_returns_unknown(self):
+        """LLM returns unknown string returns SENIORITY_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", return_value="unknown"):
+            result = extract_seniority_with_llm("== EDUCATION ==\nB.S. in CS", model="llama3.2")
+        assert result == SENIORITY_UNKNOWN
 
 
-class TestExtractUserYearsExperience:
-    """Test years of experience extraction from resume text."""
+class TestExtractUserYearsWithLLM:
+    """Test years of experience extraction from resume text using LLM."""
 
-    def test_extract_from_experience_section(self):
-        """Years are extracted from EXPERIENCE section."""
-        resume = """== EXPERIENCE ==
-Company A — Data Scientist (2020-2022)
-- 3+ years of experience with Python
-        """
-        assert extract_user_years_experience(resume) == 3
+    def test_llm_returns_integer(self):
+        """LLM returns integer years."""
+        with patch("llm_extraction._call_ollama", return_value="5"):
+            result = extract_years_with_llm("== EXPERIENCE ==\n5+ years of experience", model="llama3.2")
+        assert result == 5
 
-    def test_no_years_in_resume(self):
-        """Returns YEARS_UNKNOWN if no explicit year count found."""
-        resume = """== EXPERIENCE ==
-Company A — Data Scientist Intern (2020-2022)
-- Worked on various projects
-        """
-        assert extract_user_years_experience(resume) == YEARS_UNKNOWN
+    def test_llm_returns_zero(self):
+        """LLM returns zero for no experience."""
+        with patch("llm_extraction._call_ollama", return_value="0"):
+            result = extract_years_with_llm("Entry level position", model="llama3.2")
+        assert result == 0
 
-    def test_extract_x_years_of_y_experience_from_resume(self):
-        """'X years of Y experience' is extracted from resume."""
-        resume = """== SENIORITY LEVEL ==
-New Grad, Entry level
-2 years of internship experience
-        """
-        assert extract_user_years_experience(resume) == 2
+    def test_llm_returns_large_number(self):
+        """LLM returns large number for senior experience."""
+        with patch("llm_extraction._call_ollama", return_value="15"):
+            result = extract_years_with_llm("15+ years of leadership", model="llama3.2")
+        assert result == 15
 
-    def test_multiple_years_in_experience_returns_minimum(self):
-        """If multiple year counts in experience, return minimum."""
-        resume = """== EXPERIENCE ==
-- 5+ years of Python experience
-- 10+ years of leadership experience
-        """
-        assert extract_user_years_experience(resume) == 5
+    def test_llm_failure_returns_unknown(self):
+        """LLM failure returns YEARS_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", side_effect=Exception("timeout")):
+            result = extract_years_with_llm("== EXPERIENCE ==\n3+ years", model="llama3.2")
+        assert result == YEARS_UNKNOWN
 
-    def test_fallback_to_full_text_when_no_experience_section(self):
-        """Falls back to full-text scan if == EXPERIENCE == section is missing."""
-        resume = """== EDUCATION ==
-B.S. in Computer Science
-Had 4+ years of internship experience during college
-        """
-        assert extract_user_years_experience(resume) == 4
+    def test_llm_unknown_string_returns_unknown(self):
+        """LLM returns unknown string returns YEARS_UNKNOWN."""
+        with patch("llm_extraction._call_ollama", return_value="unknown"):
+            result = extract_years_with_llm("No clear years stated", model="llama3.2")
+        assert result == YEARS_UNKNOWN
 
 
 class TestBuildChromaWhereFilter:
@@ -352,3 +368,104 @@ class TestBuildChromaWhereFilter:
         # Should have a condition with $lte for required_degree
         conditions_str = str(result)
         assert "$lte" in conditions_str or "$eq" in conditions_str
+
+
+class TestExtractDegreeWithFallback:
+    def test_regex_match_skips_llm(self):
+        with patch("src.generation._call_ollama") as mock_llm:
+            result = extract_degree_with_fallback("requires a PhD")
+        assert result == DEGREE_PHD
+        mock_llm.assert_not_called()
+
+    def test_llm_called_on_unknown(self):
+        with patch("src.generation._call_ollama", return_value="bachelor") as mock_llm:
+            result = extract_degree_with_fallback("no degree info here")
+        assert result == DEGREE_BACHELOR
+        mock_llm.assert_called_once()
+
+    def test_llm_phd_response(self):
+        with patch("src.generation._call_ollama", return_value="PhD"):
+            result = extract_degree_with_fallback("no degree info here")
+        assert result == DEGREE_PHD
+
+    def test_llm_master_response(self):
+        with patch("src.generation._call_ollama", return_value="Master"):
+            result = extract_degree_with_fallback("no degree info here")
+        assert result == DEGREE_MASTER
+
+    def test_llm_failure_returns_unknown(self):
+        with patch("src.generation._call_ollama", side_effect=Exception("timeout")):
+            result = extract_degree_with_fallback("no degree info here")
+        assert result == DEGREE_UNKNOWN
+
+    def test_llm_unknown_string_returns_unknown(self):
+        with patch("src.generation._call_ollama", return_value="Unknown"):
+            result = extract_degree_with_fallback("no degree info here")
+        assert result == DEGREE_UNKNOWN
+
+
+class TestExtractSeniorityWithFallback:
+    def test_regex_match_skips_llm(self):
+        with patch("src.generation._call_ollama") as mock_llm:
+            result = extract_seniority_with_fallback("Senior Software Engineer")
+        assert result == SENIORITY_SENIOR
+        mock_llm.assert_not_called()
+
+    def test_llm_called_on_unknown(self):
+        with patch("src.generation._call_ollama", return_value="mid") as mock_llm:
+            result = extract_seniority_with_fallback("software engineer role")
+        assert result == SENIORITY_MID
+        mock_llm.assert_called_once()
+
+    def test_llm_senior_response(self):
+        with patch("src.generation._call_ollama", return_value="Senior"):
+            result = extract_seniority_with_fallback("software engineer role")
+        assert result == SENIORITY_SENIOR
+
+    def test_llm_entry_response(self):
+        with patch("src.generation._call_ollama", return_value="entry"):
+            result = extract_seniority_with_fallback("software engineer role")
+        assert result == SENIORITY_ENTRY
+
+    def test_llm_failure_returns_unknown(self):
+        with patch("src.generation._call_ollama", side_effect=Exception("timeout")):
+            result = extract_seniority_with_fallback("software engineer role")
+        assert result == SENIORITY_UNKNOWN
+
+    def test_llm_unknown_string_returns_unknown(self):
+        with patch("src.generation._call_ollama", return_value="Unknown"):
+            result = extract_seniority_with_fallback("software engineer role")
+        assert result == SENIORITY_UNKNOWN
+
+class TestExtractYearsWithFallback:
+    def test_regex_match_skips_llm(self):
+        with patch("src.generation._call_ollama") as mock_llm:
+            result = extract_years_with_fallback("5+ years of experience required")
+        assert result == 5
+        mock_llm.assert_not_called()
+
+    def test_llm_called_on_unknown(self):
+        with patch("src.generation._call_ollama", return_value="3") as mock_llm:
+            result = extract_years_with_fallback("some experience needed")
+        assert result == 3
+        mock_llm.assert_called_once()
+
+    def test_llm_integer_response(self):
+        with patch("src.generation._call_ollama", return_value="7"):
+            result = extract_years_with_fallback("some experience needed")
+        assert result == 7
+
+    def test_llm_unknown_string_returns_unknown(self):
+        with patch("src.generation._call_ollama", return_value="Unknown"):
+            result = extract_years_with_fallback("some experience needed")
+        assert result == YEARS_UNKNOWN
+
+    def test_llm_failure_returns_unknown(self):
+        with patch("src.generation._call_ollama", side_effect=Exception("timeout")):
+            result = extract_years_with_fallback("some experience needed")
+        assert result == YEARS_UNKNOWN
+
+    def test_llm_response_with_extra_text(self):
+        with patch("src.generation._call_ollama", return_value="about 4 years"):
+            result = extract_years_with_fallback("some experience needed")
+        assert result == 4

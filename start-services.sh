@@ -11,7 +11,9 @@ echo "Waiting for Ollama..."
 until curl -s http://localhost:11434/api/tags >/dev/null 2>&1; do sleep 1; done
 echo "Ollama ready"
 
-# Start Docker Compose services
+# Rebuild and start Docker Compose services
+docker-compose down
+docker-compose build --no-cache
 docker-compose up -d
 
 # Wait for app to be healthy

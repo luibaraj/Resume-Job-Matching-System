@@ -1,4 +1,7 @@
 from contextlib import asynccontextmanager
+import os
+import sqlite3
+import chromadb
 from dotenv import load_dotenv
 load_dotenv()  # Loads .env from current directory
 
@@ -13,6 +16,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.retrieval import build_collection
+
+    # Sync Chroma collection from SQLite at startup
+    conn = sqlite3.connect(os.environ["DB_PATH"])
+    chroma_client = chromadb.PersistentClient(path=os.environ["CHROMA_DIR"])
+    build_collection(conn, chroma_client)
+    conn.close()
+
     yield  # startup/shutdown hooks go here later
 
 app = FastAPI(title="Job Matcher", lifespan=lifespan)

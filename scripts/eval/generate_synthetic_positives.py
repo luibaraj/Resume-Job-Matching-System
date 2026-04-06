@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from src.config import YEARS_UNKNOWN
 from src.eval.positive_gen.positives_pipeline import run_pipeline
 from src.eval.positive_gen.positives_validate import ResumeInfo
-from src.regex_extraction import extract_user_years_experience
+from src.llm_extraction import extract_years_with_llm
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def build_resume_info(row: dict) -> ResumeInfo:
     seniority = seniority_str.title()
 
     # Extract years of experience, with seniority-based fallback
-    years = extract_user_years_experience(resume_text)
+    years = extract_years_with_llm(resume_text, model='llama3.2')
     if years == YEARS_UNKNOWN:
         # Fallback map based on seniority
         fallback_map = {

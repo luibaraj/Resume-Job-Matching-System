@@ -401,7 +401,9 @@ def main() -> None:
             logger.info("Building ChromaDB collection from embeddings...")
             start_build = time.monotonic()
             collection = build_collection(
-                conn, chroma_client, CHROMA_COLLECTION_NAME, ef_construction=HNSW_EF_CONSTRUCTION
+                conn, chroma_client, CHROMA_COLLECTION_NAME, 
+                ef_construction=HNSW_EF_CONSTRUCTION,
+                model=OLLAMA_MODEL
             )
             elapsed_build = time.monotonic() - start_build
             logger.info("Collection ready with %d jobs indexed in %.2fs.", collection.count(), elapsed_build)

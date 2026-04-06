@@ -19,6 +19,7 @@ from src.config import (
     EMBEDDING_DIM,
     SENIORITY_UNKNOWN,
     YEARS_UNKNOWN,
+    OLLAMA_MODEL,
 )
 from src.embedding import deserialize_embedding
 from src.regex_extraction import (
@@ -26,6 +27,11 @@ from src.regex_extraction import (
     extract_seniority_from_title,
     extract_seniority_level,
     extract_years_experience,
+    build_chroma_where_filter,
+    describe_chroma_filter,
+    extract_degree_with_fallback,
+    extract_seniority_with_fallback,
+    extract_years_with_fallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,6 +61,7 @@ def build_collection(
     chroma_client: ClientAPI,
     collection_name: str = DEFAULT_COLLECTION_NAME,
     ef_construction: int = 100,
+    model: str = OLLAMA_MODEL,
 ) -> chromadb.Collection:
     """
     Load embedded jobs from SQLite and upsert them into a Chroma collection.
@@ -121,9 +128,9 @@ def build_collection(
                     "source_url": row["source_url"] or "",
                     "board_token": row["board_token"] or "",
                     "cleaned_description": desc,
-                    "required_degree": extract_degree_requirement(desc),
-                    "seniority_level": extract_seniority_level(desc) or extract_seniority_from_title(row["title"] or ""),
-                    "min_years_experience": extract_years_experience(desc),
+                    "required_degree": extract_degree_with_fallback(desc, model=model),
+                    "seniority_level": extract_seniority_with_fallback(desc, model=model) or extract_seniority_from_title(row["title"] or ""),
+                    "min_years_experience": extract_years_with_fallback(desc, model=model),
                 }
             )
 
