@@ -137,6 +137,15 @@
             margin-bottom: 20px;
         }
 
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
         .loading {
             text-align: center;
             color: white;
@@ -313,7 +322,7 @@
                     return;
                 }
 
-                displayResults(data.matches);
+                displayResults(data);
             } catch (error) {
                 showError(error.message || 'An error occurred');
             }
@@ -336,9 +345,14 @@
             `;
         }
 
-        function displayResults(matches) {
+        function displayResults(data) {
+            const matches = data.matches;
+            const warningHTML = data.corpus_warning
+                ? `<div class="warning">${escapeHtml(data.corpus_warning)}</div>`
+                : '';
+
             if (matches.length === 0) {
-                resultsContainer.innerHTML = `
+                resultsContainer.innerHTML = warningHTML + `
                     <div class="no-results">
                         <p>No job matches found. Try adjusting your resume or the number of matches.</p>
                     </div>
@@ -348,6 +362,7 @@
 
             const html = `
                 <div class="results">
+                    ${warningHTML}
                     <h2 style="color: white; margin-bottom: 20px;">Found ${matches.length} matches</h2>
                     <div class="matches-grid">
                         ${matches.map(match => `

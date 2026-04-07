@@ -82,8 +82,8 @@ def mock_ollama_health():
 @pytest.fixture
 def mock_generate_explanation():
     """Mock generate_explanation function."""
-    with patch('fastapi_app.api.routers.match.generate_explanation') as mock:
-        mock.return_value = "This is a generated explanation"
+    with patch('fastapi_app.api.routers.match.generate_explanation_with_pipeline') as mock:
+        mock.return_value = ("This is a generated explanation", None)
         yield mock
 
 

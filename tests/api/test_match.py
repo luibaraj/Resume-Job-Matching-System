@@ -40,7 +40,8 @@ def test_match_score_calculation(api_client, mock_collection):
 def test_match_ollama_failure_returns_200_without_explanations(api_client, mock_generate_explanation):
     """Test that Ollama failure returns 200 but explanations may be null."""
     # Make generate_explanation return None (simulating failure)
-    mock_generate_explanation.return_value = None
+    # FIX: generate_explanation_with_pipeline returns tuple (explanation, corpus_warning)
+    mock_generate_explanation.return_value = (None, None)
     
     response = api_client.post(
         "/match",

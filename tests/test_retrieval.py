@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import chromadb
 import numpy as np
@@ -234,6 +235,28 @@ class TestBuildCollection:
         collection = build_collection(conn, tmp_chroma, ef_construction=200)
 
         assert collection.metadata.get("hnsw_construction") == 200
+        conn.close()
+
+    def test_model_param_accepted(self, tmp_db, tmp_chroma):
+        import sqlite3
+        conn = sqlite3.connect(tmp_db)
+        conn.row_factory = sqlite3.Row
+        collection = build_collection(conn, tmp_chroma, "test_model_param", model="test-model")
+        conn.close()
+        assert collection is not None
+
+    def test_metadata_uses_fallback_functions(self, tmp_db, tmp_chroma):
+        import sqlite3
+        conn = sqlite3.connect(tmp_db)
+        conn.row_factory = sqlite3.Row
+        with patch("retrieval.extract_degree_with_fallback", return_value=1) as mock_deg, \
+             patch("retrieval.extract_seniority_with_fallback", return_value=2) as mock_sen, \
+             patch("retrieval.extract_years_with_fallback", return_value=3) as mock_yrs:
+            collection = build_collection(conn, tmp_chroma, "test_fallback_meta")
+            embedded_count = collection.count()
+            assert mock_deg.call_count == embedded_count
+            assert mock_sen.call_count == embedded_count
+            assert mock_yrs.call_count == embedded_count
         conn.close()
 
 
