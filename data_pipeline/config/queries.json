@@ -10,7 +10,8 @@
     "jobsapi": 50,
     "serpapi": 21,
     "arbeitnow": 20,
-    "jobicy": 12
+    "jobicy": 12,
+    "jooble": 38
   },
   "jobicy_tags": ["engineer", "data", "python", "cloud", "analytics", "devops", "backend", "fullstack", "java", "sql", "react", "typescript"]
 }

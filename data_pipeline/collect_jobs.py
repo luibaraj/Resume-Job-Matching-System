@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-from data_pipeline.collectors import ArbeitnowCollector, GreenhouseCollector, JobicyCollector, JSearchCollector, JobSearchCollector, JobsApiCollector, SerpApiCollector
+from data_pipeline.collectors import ArbeitnowCollector, GreenhouseCollector, JobicyCollector, JoobleCollector, JSearchCollector, JobSearchCollector, JobsApiCollector, SerpApiCollector
 from data_pipeline.db.migrate import main as run_migration
 
 logging.basicConfig(
@@ -95,6 +95,11 @@ class JobCollectionOrchestrator:
                 jc_jobs, jc_log = self._collect_jobicy(queries, queries_config)
                 all_jobs.extend(jc_jobs)
                 self.collection_log.append(jc_log)
+
+                # Jooble (with pooling, 500/month limit)
+                jo_jobs, jo_log = self._collect_jooble(queries, queries_config)
+                all_jobs.extend(jo_jobs)
+                self.collection_log.append(jo_log)
 
                 # Upsert all jobs
                 new_count = self._upsert_jobs(conn, all_jobs)
@@ -321,6 +326,38 @@ class JobCollectionOrchestrator:
             return [], {
                 "run_at": self.run_at,
                 "source": "jobicy",
+                "jobs_found": 0,
+                "jobs_error": 1,
+                "requests": collector.requests_used,
+                "errors": "\n".join(errors_list),
+            }
+
+    def _collect_jooble(self, queries: List[str], config: Dict) -> tuple:
+        """Collect from Jooble (with pooling, 500/month limit)"""
+        logger.info("Starting Jooble collection")
+        collector = JoobleCollector(run_budget=config.get("pools", {}).get("jooble", 38))
+        errors_list = []
+
+        try:
+            jobs = collector.collect_all(queries)
+            for job in jobs:
+                job["scraped_at"] = self.run_at
+
+            logger.info(f"Jooble collected {len(jobs)} jobs (used {collector.requests_used} requests)")
+            return jobs, {
+                "run_at": self.run_at,
+                "source": "jooble",
+                "jobs_found": len(jobs),
+                "requests": collector.requests_used,
+            }
+
+        except Exception as e:
+            error_msg = f"Jooble error: {str(e)}"
+            logger.error(error_msg)
+            errors_list.append(error_msg)
+            return [], {
+                "run_at": self.run_at,
+                "source": "jooble",
                 "jobs_found": 0,
                 "jobs_error": 1,
                 "requests": collector.requests_used,
