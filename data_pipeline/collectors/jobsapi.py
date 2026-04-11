@@ -52,6 +52,7 @@ class JobsApiCollector(BaseCollector):
             "query": query,
             "location": "United States",
             "countryCode": "us",
+            "page": page,
         }
 
         headers = {

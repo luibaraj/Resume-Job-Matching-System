@@ -51,7 +51,6 @@ class JSearchCollector(BaseCollector):
             "query": query,
             "date_posted": "3days",
             "page": page,
-            "num_pages": 1,
             "country": "us",
         }
 

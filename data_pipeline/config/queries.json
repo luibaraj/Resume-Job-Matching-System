@@ -6,7 +6,11 @@
   ],
   "pools": {
     "jsearch": 38,
-    "flyby": 15,
-    "serpapi": 19
-  }
+    "jobsearch": 50,
+    "jobsapi": 50,
+    "serpapi": 21,
+    "arbeitnow": 20,
+    "jobicy": 12
+  },
+  "jobicy_tags": ["engineer", "data", "python", "cloud", "analytics", "devops", "backend", "fullstack", "java", "sql", "react", "typescript"]
 }
