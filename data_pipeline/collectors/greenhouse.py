@@ -4,6 +4,7 @@ Fetches from all configured board tokens (no pooling, single call per board).
 """
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from src.greenhouse_scraper import GreenhouseScraper
@@ -65,7 +66,8 @@ class GreenhouseCollector:
             List of normalized job dicts
         """
         scraper = GreenhouseScraper(board_token)
-        gh_jobs = scraper.fetch_jobs(status="published", updated_after_days=3)
+        updated_after = datetime.now(timezone.utc) - timedelta(days=3)
+        gh_jobs = scraper.fetch_jobs(status="published", updated_after=updated_after)
 
         normalized = []
         for job in gh_jobs:

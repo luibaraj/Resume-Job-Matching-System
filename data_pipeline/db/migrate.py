@@ -32,7 +32,10 @@ def migrate_jobs_table(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'")
     if not cursor.fetchone():
-        logger.info("jobs table does not exist, will be created by schema.sql")
+        logger.info("jobs table does not exist, creating from schema.sql")
+        schema_path = Path(__file__).parent / "schema.sql"
+        with open(schema_path) as f:
+            conn.executescript(f.read())
         return
 
     # Check if already migrated (source_system column exists)
