@@ -64,8 +64,8 @@ class GreenhouseCollector:
         Returns:
             List of normalized job dicts
         """
-        scraper = GreenhouseScraper(session=None)
-        gh_jobs = scraper.fetch_jobs(board_token, status="published", updated_after_days=3)
+        scraper = GreenhouseScraper(board_token)
+        gh_jobs = scraper.fetch_jobs(status="published", updated_after_days=3)
 
         normalized = []
         for job in gh_jobs:
