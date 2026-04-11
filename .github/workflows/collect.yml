@@ -20,7 +20,7 @@ jobs:
         continue-on-error: true
       - run: python -m data_pipeline.collect_jobs
         env:
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          X_RAPID_API: ${{ secrets.RAPIDAPI_KEY }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
       - uses: actions/upload-artifact@v4
         with:

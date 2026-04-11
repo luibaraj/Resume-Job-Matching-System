@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-from data_pipeline.collectors import FlyByCollector, GreenhouseCollector, JSearchCollector, SerpApiCollector
+from data_pipeline.collectors import GreenhouseCollector, JSearchCollector, JobSearchCollector, JobsApiCollector, SerpApiCollector
 from data_pipeline.db.migrate import main as run_migration
 
 logging.basicConfig(
@@ -71,10 +71,15 @@ class JobCollectionOrchestrator:
                 all_jobs.extend(js_jobs)
                 self.collection_log.append(js_log)
 
-                # FlyBy (with pooling)
-                fb_jobs, fb_log = self._collect_flyby(queries, queries_config)
-                all_jobs.extend(fb_jobs)
-                self.collection_log.append(fb_log)
+                # JobSearch (with pooling)
+                jbs_jobs, jbs_log = self._collect_jobsearch(queries, queries_config)
+                all_jobs.extend(jbs_jobs)
+                self.collection_log.append(jbs_log)
+
+                # JobsApi (with pooling)
+                ja_jobs, ja_log = self._collect_jobsapi(queries, queries_config)
+                all_jobs.extend(ja_jobs)
+                self.collection_log.append(ja_log)
 
                 # SerpApi (with pooling)
                 sa_jobs, sa_log = self._collect_serpapi(queries, queries_config)
@@ -209,10 +214,10 @@ class JobCollectionOrchestrator:
                 "errors": "\n".join(errors_list),
             }
 
-    def _collect_flyby(self, queries: List[str], config: Dict) -> tuple:
-        """Collect from FlyBy"""
-        logger.info("Starting FlyBy collection")
-        collector = FlyByCollector(run_budget=config.get("pools", {}).get("flyby", 15))
+    def _collect_jobsearch(self, queries: List[str], config: Dict) -> tuple:
+        """Collect from JobSearch API"""
+        logger.info("Starting JobSearch collection")
+        collector = JobSearchCollector(run_budget=config.get("pools", {}).get("jobsearch", 50))
         jobs_found = 0
         errors_list = []
 
@@ -223,21 +228,56 @@ class JobCollectionOrchestrator:
             for job in jobs:
                 job["scraped_at"] = self.run_at
 
-            logger.info(f"FlyBy collected {jobs_found} jobs (used {collector.requests_used} requests)")
+            logger.info(f"JobSearch collected {jobs_found} jobs (used {collector.requests_used} requests)")
             return jobs, {
                 "run_at": self.run_at,
-                "source": "flyby",
+                "source": "jobsearch",
                 "jobs_found": jobs_found,
                 "requests": collector.requests_used,
             }
 
         except Exception as e:
-            error_msg = f"FlyBy error: {str(e)}"
+            error_msg = f"JobSearch error: {str(e)}"
             logger.error(error_msg)
             errors_list.append(error_msg)
             return [], {
                 "run_at": self.run_at,
-                "source": "flyby",
+                "source": "jobsearch",
+                "jobs_found": 0,
+                "jobs_error": 1,
+                "requests": collector.requests_used,
+                "errors": "\n".join(errors_list),
+            }
+
+    def _collect_jobsapi(self, queries: List[str], config: Dict) -> tuple:
+        """Collect from Jobs API"""
+        logger.info("Starting JobsApi collection")
+        collector = JobsApiCollector(run_budget=config.get("pools", {}).get("jobsapi", 50))
+        jobs_found = 0
+        errors_list = []
+
+        try:
+            jobs = collector.collect_all(queries)
+            jobs_found = len(jobs)
+
+            for job in jobs:
+                job["scraped_at"] = self.run_at
+
+            logger.info(f"JobsApi collected {jobs_found} jobs (used {collector.requests_used} requests)")
+            return jobs, {
+                "run_at": self.run_at,
+                "source": "jobsapi",
+                "jobs_found": jobs_found,
+                "requests": collector.requests_used,
+            }
+
+        except Exception as e:
+            error_msg = f"JobsApi error: {str(e)}"
+            logger.error(error_msg)
+            errors_list.append(error_msg)
+            return [], {
+                "run_at": self.run_at,
+                "source": "jobsapi",
                 "jobs_found": 0,
                 "jobs_error": 1,
                 "requests": collector.requests_used,
