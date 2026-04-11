@@ -1,9 +1,13 @@
 from contextlib import asynccontextmanager
+import logging
 import os
 import sqlite3
 import chromadb
 from dotenv import load_dotenv
 load_dotenv()  # Loads .env from current directory
+
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level)
 
 
 from fastapi import FastAPI
@@ -14,15 +18,20 @@ from fastapi_app.api.routers import health, match
 from fastapi_app.api import errors
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from src.retrieval import build_collection
 
     # Sync Chroma collection from SQLite at startup
-    conn = sqlite3.connect(os.environ["DB_PATH"])
-    chroma_client = chromadb.PersistentClient(path=os.environ["CHROMA_DIR"])
-    build_collection(conn, chroma_client)
-    conn.close()
+    try:
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        chroma_client = chromadb.PersistentClient(path=os.environ["CHROMA_DIR"])
+        build_collection(conn, chroma_client)
+        conn.close()
+    except Exception as e:
+        logger.error(f"Startup collection build failed: {e}")
 
     yield  # startup/shutdown hooks go here later
 

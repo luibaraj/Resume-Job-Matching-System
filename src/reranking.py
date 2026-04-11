@@ -100,7 +100,10 @@ def rerank_jobs(
                 documents=documents,
                 top_n=min(top_n, len(jobs)),
             )
-            return [jobs[result.index] for result in response.results]
+            reranked = [jobs[result.index] for result in response.results]
+            for r in reranked:
+                logger.debug("rerank_jobs: id=%s source_url=%r", r["id"], r.get("source_url"))
+            return reranked
         except Exception as exc:
             attempt += 1
             if attempt > max_retries:

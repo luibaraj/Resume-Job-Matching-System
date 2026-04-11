@@ -4,14 +4,9 @@ from fastapi_app.api.schemas import MatchRequest, MatchResponse, JobMatch
 from fastapi_app.api.dependencies import get_voyage_client, get_chroma_collection, get_cohere_client, get_ollama_base_url
 from src.retrieval import query_collection
 from src.reranking import rerank_jobs
-from src.llm_extraction import (
-    extract_degree_with_llm,
-    extract_seniority_with_llm,
-    extract_years_with_llm,
-)
 from src.regex_extraction import build_chroma_where_filter
 from src.generation import run_generation_pipeline
-from src.config import MAX_BATCH_SIZE, CORPUS_LIMITATION_MESSAGE
+from src.config import MAX_BATCH_SIZE, CORPUS_LIMITATION_MESSAGE, DEGREE_UNKNOWN, SENIORITY_UNKNOWN, YEARS_UNKNOWN
 import logging
 import requests
 
@@ -103,21 +98,18 @@ async def match(
             detail="failed to check job index"
         )
 
-    # 2. Extract degree, seniority, and years from resume
-    try:
-        user_degree = extract_degree_with_llm(req.resume, "llama3.2:3b-instruct-q4_K_M")
-        user_seniority = extract_seniority_with_llm(req.resume, "llama3.2:3b-instruct-q4_K_M")
-        user_years = extract_years_with_llm(req.resume, "llama3.2:3b-instruct-q4_K_M")
-        where_filter = build_chroma_where_filter(user_degree, user_seniority, user_years)
-        logger.info(
-            "Extracted user profile — degree: %d, seniority: %d, years: %d",
-            user_degree,
-            user_seniority,
-            user_years,
-        )
-    except Exception as e:
-        logger.error(f"Failed to extract user filters: {e}")
-        where_filter = None
+    # 2. Build where filter from user-provided values (skip LLM extraction)
+    user_degree = req.required_degree if req.required_degree is not None else DEGREE_UNKNOWN
+    user_seniority = req.seniority_level if req.seniority_level is not None else SENIORITY_UNKNOWN
+    user_years = req.min_years_experience if req.min_years_experience is not None else YEARS_UNKNOWN
+    where_filter = build_chroma_where_filter(user_degree, user_seniority, user_years)
+    logger.info(
+        "User filters — degree: %d, seniority: %d, years: %d",
+        user_degree,
+        user_seniority,
+        user_years,
+    )
+    logger.debug("where_filter: %s", where_filter)
 
     # 3. Embed resume
     try:
@@ -196,13 +188,30 @@ async def match(
         # For now, use 1.0 - distance to have higher scores for more similar items
         distance = job.get('distance', 1.0)
         score = max(0.0, 1.0 - distance)
+        absolute_url = job.get('source_url') or None
+
+        logger.debug(
+            "match: job_id=%s title=%r absolute_url=%r",
+            job_id,
+            job.get('title', ''),
+            absolute_url,
+        )
+        logger.debug(
+            "match: job_id=%s min_years=%s seniority=%s degree=%s",
+            job_id,
+            job.get('min_years_experience'),
+            job.get('seniority_level'),
+            job.get('required_degree'),
+        )
+
         matches.append(
             JobMatch(
                 job_id=job_id,
                 title=job.get('title', ''),
                 company_name=job.get('company_name', ''),
                 score=score,
-                explanation=explanation
+                explanation=explanation,
+                absolute_url=absolute_url
             )
         )
 

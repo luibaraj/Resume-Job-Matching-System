@@ -84,7 +84,8 @@
             flex: 1;
         }
 
-        .input-group input {
+        .input-group input,
+        .input-group select {
             width: 100%;
             padding: 10px;
             border: 2px solid #e0e0e0;
@@ -92,7 +93,8 @@
             font-size: 1em;
         }
 
-        .input-group input:focus {
+        .input-group input:focus,
+        .input-group select:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -258,6 +260,28 @@
 
                 <div class="input-group">
                     <div>
+                        <label for="minYears">Min years exp.</label>
+                        <input type="number" id="minYears" name="minYears" min="0" placeholder="Any">
+                    </div>
+                    <div>
+                        <label for="seniority">Seniority</label>
+                        <select id="seniority" name="seniority">
+                            <option value="">Any</option>
+                            <option value="1">1 — Entry</option>
+                            <option value="2">2 — Mid</option>
+                            <option value="3">3 — Senior</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="degree">Education</label>
+                        <select id="degree" name="degree">
+                            <option value="">Any</option>
+                            <option value="1">1 — Bachelor's</option>
+                            <option value="2">2 — Master's</option>
+                            <option value="3">3 — PhD</option>
+                        </select>
+                    </div>
+                    <div>
                         <label for="topK">Number of matches</label>
                         <input
                             type="number"
@@ -304,15 +328,20 @@
             showLoading();
 
             try {
+                const body = { resume, top_k: topK };
+                const minYears = parseInt(document.getElementById('minYears').value);
+                const seniorityVal = document.getElementById('seniority').value;
+                const degreeVal = document.getElementById('degree').value;
+                if (!isNaN(minYears)) body.min_years_experience = minYears;
+                if (seniorityVal !== '') body.seniority_level = parseInt(seniorityVal);
+                if (degreeVal !== '') body.required_degree = parseInt(degreeVal);
+
                 const response = await fetch('/match', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        resume: resume,
-                        top_k: topK
-                    })
+                    body: JSON.stringify(body)
                 });
 
                 const data = await response.json();
@@ -347,6 +376,11 @@
 
         function displayResults(data) {
             const matches = data.matches;
+
+            matches.forEach(match => {
+                console.log('Job card URL:', match.title, '->', match.absolute_url);
+            });
+
             const warningHTML = data.corpus_warning
                 ? `<div class="warning">${escapeHtml(data.corpus_warning)}</div>`
                 : '';
@@ -371,6 +405,7 @@
                                     <div>
                                         <div class="match-title">${escapeHtml(match.title)}</div>
                                         ${match.company_name ? `<div class="match-company">${escapeHtml(match.company_name)}</div>` : ''}
+                                        ${match.absolute_url ? `<a href="${match.absolute_url}" target="_blank" rel="noopener noreferrer">View Job</a>` : ''}
                                     </div>
                                     <div class="match-score">${(match.score * 100).toFixed(1)}%</div>
                                 </div>

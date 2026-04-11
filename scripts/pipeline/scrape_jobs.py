@@ -64,7 +64,7 @@ def init_db(db_path: str) -> None:
         conn.close()
 
 
-def scrape_board_safe(token: str) -> tuple[str, list[GreenhouseJob] | Exception]:
+def scrape_board_safe(token: str, updated_after_days: int | None = None) -> tuple[str, list[GreenhouseJob] | Exception]:
     """
     Wrap scrape_greenhouse_board to handle errors gracefully with retries.
 
@@ -76,7 +76,7 @@ def scrape_board_safe(token: str) -> tuple[str, list[GreenhouseJob] | Exception]
 
     for attempt in range(1, _SCRAPE_MAX_RETRIES + 1):
         try:
-            jobs = scrape_greenhouse_board(token)
+            jobs = scrape_greenhouse_board(token, updated_after_days=updated_after_days)
             logger.info("[%s] Done — %d jobs.", token, len(jobs))
             return (token, jobs)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
@@ -111,7 +111,7 @@ def scrape_board_safe(token: str) -> tuple[str, list[GreenhouseJob] | Exception]
     return (token, Exception("Unknown scrape error"))
 
 
-async def scrape_all_boards(tokens: list[str], max_workers: int) -> list[tuple]:
+async def scrape_all_boards(tokens: list[str], max_workers: int, updated_after_days: int | None = None) -> list[tuple]:
     """
     Scrape all boards concurrently using ThreadPoolExecutor.
 
@@ -120,7 +120,7 @@ async def scrape_all_boards(tokens: list[str], max_workers: int) -> list[tuple]:
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         tasks = [
-            loop.run_in_executor(executor, scrape_board_safe, token)
+            loop.run_in_executor(executor, scrape_board_safe, token, updated_after_days)
             for token in tokens
         ]
         results = await asyncio.gather(*tasks)
@@ -199,6 +199,12 @@ async def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
     )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Only scrape jobs updated in last N days (default: all jobs)",
+    )
     args = parser.parse_args()
 
     # Configure logging (after argparse)
@@ -219,12 +225,26 @@ async def main():
     # Resolve database path: arg → env var → default
     db_path = args.db_path or os.getenv("DB_PATH", DB_DEFAULT_PATH)
 
+    # Resolve recency filter: arg → env var → None (all jobs)
+    updated_after_days = args.days
+    if updated_after_days is None:
+        env_days = os.getenv("SCRAPE_DAYS")
+        if env_days:
+            try:
+                updated_after_days = int(env_days)
+            except ValueError:
+                logger.warning("Invalid SCRAPE_DAYS value '%s', ignoring", env_days)
+
     if not board_tokens:
         logger.error("ERROR: GREENHOUSE_BOARD_TOKENS is not set or empty in .env")
         sys.exit(1)
 
     logger.info("[%s] Boards to scrape: %s", run_id, board_tokens)
-    logger.info("[%s] Database: %s\n", run_id, db_path)
+    logger.info("[%s] Database: %s", run_id, db_path)
+    if updated_after_days:
+        logger.info("[%s] Recency filter: jobs updated in last %d days\n", run_id, updated_after_days)
+    else:
+        logger.info("[%s] Recency filter: none (all jobs)\n", run_id)
 
     # Initialize DB and time it
     start_init = time.monotonic()
@@ -235,7 +255,7 @@ async def main():
     # Scrape all boards concurrently and time it
     max_workers = min(len(board_tokens), 10)
     start_scrape = time.monotonic()
-    results = await scrape_all_boards(board_tokens, max_workers)
+    results = await scrape_all_boards(board_tokens, max_workers, updated_after_days=updated_after_days)
     elapsed_scrape = time.monotonic() - start_scrape
     logger.info("[%s] scrape_all_boards completed in %.2fs", run_id, elapsed_scrape)
 

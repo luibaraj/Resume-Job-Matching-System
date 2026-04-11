@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Unset OLLAMA_HOST to allow binding to localhost
+unset OLLAMA_HOST
+
 echo "Starting services..."
 
 # Start Ollama on host

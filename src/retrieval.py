@@ -20,6 +20,7 @@ from src.config import (
     SENIORITY_UNKNOWN,
     YEARS_UNKNOWN,
     OLLAMA_MODEL,
+    USE_LLM_FALLBACK,
 )
 from src.embedding import deserialize_embedding
 from src.regex_extraction import (
@@ -62,6 +63,7 @@ def build_collection(
     collection_name: str = DEFAULT_COLLECTION_NAME,
     ef_construction: int = 100,
     model: str = OLLAMA_MODEL,
+    use_llm_fallback: bool = USE_LLM_FALLBACK,
 ) -> chromadb.Collection:
     """
     Load embedded jobs from SQLite and upsert them into a Chroma collection.
@@ -120,6 +122,16 @@ def build_collection(
             )
             desc = row["cleaned_description"] or ""
             documents.append(desc)
+
+            if use_llm_fallback:
+                degree = extract_degree_with_fallback(desc, model=model)
+                seniority = extract_seniority_with_fallback(desc, model=model) or extract_seniority_from_title(row["title"] or "")
+                years = extract_years_with_fallback(desc, model=model)
+            else:
+                degree = extract_degree_requirement(desc)
+                seniority = extract_seniority_level(desc) or extract_seniority_from_title(row["title"] or "")
+                years = extract_years_experience(desc)
+
             metadatas.append(
                 {
                     "title": row["title"] or "",
@@ -128,9 +140,9 @@ def build_collection(
                     "source_url": row["source_url"] or "",
                     "board_token": row["board_token"] or "",
                     "cleaned_description": desc,
-                    "required_degree": extract_degree_with_fallback(desc, model=model),
-                    "seniority_level": extract_seniority_with_fallback(desc, model=model) or extract_seniority_from_title(row["title"] or ""),
-                    "min_years_experience": extract_years_with_fallback(desc, model=model),
+                    "required_degree": degree,
+                    "seniority_level": seniority,
+                    "min_years_experience": years,
                 }
             )
 
@@ -236,6 +248,12 @@ def query_collection(
         seniority_level: int = int(seniority_val) if isinstance(seniority_val, (int, str, float)) else SENIORITY_UNKNOWN
         years_val = meta.get("min_years_experience", YEARS_UNKNOWN)
         min_years_experience: int = int(years_val) if isinstance(years_val, (int, str, float)) else YEARS_UNKNOWN
+
+        logger.debug(
+            "query_collection: id=%s source_url=%r",
+            doc_id,
+            source_url,
+        )
 
         results.append(
             JobResult(

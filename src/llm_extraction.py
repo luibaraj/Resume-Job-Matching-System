@@ -78,6 +78,7 @@ Answer:"""
     try:
         response = _call_ollama(prompt, model)
         degree = _parse_int_response(response, DEGREE_UNKNOWN)
+        logger.debug("degree raw=%r parsed=%d", response, degree)
         # Clamp to valid range
         if degree not in (DEGREE_UNKNOWN, DEGREE_BACHELOR, DEGREE_MASTER, DEGREE_PHD):
             logger.warning("Invalid degree value %d, returning UNKNOWN", degree)
@@ -115,6 +116,7 @@ Answer:"""
     try:
         response = _call_ollama(prompt, model)
         seniority = _parse_int_response(response, SENIORITY_UNKNOWN)
+        logger.debug("seniority raw=%r parsed=%d", response, seniority)
         # Clamp to valid range
         if seniority not in (
             SENIORITY_UNKNOWN,
@@ -154,6 +156,7 @@ Answer:"""
     try:
         response = _call_ollama(prompt, model)
         years = _parse_int_response(response, YEARS_UNKNOWN)
+        logger.debug("years raw=%r parsed=%d", response, years)
         # Validate: years should be >= 0 or exactly YEARS_UNKNOWN
         if years < 0 and years != YEARS_UNKNOWN:
             logger.warning("Invalid years value %d, returning UNKNOWN", years)

@@ -6,6 +6,8 @@ are NOT read here — scripts load them via load_dotenv() and pass values as
 explicit arguments to src/ functions.
 """
 
+import os
+
 # Voyage AI / Embedding
 VOYAGE_MODEL: str = "voyage-3.5-lite"
 EMBEDDING_DIM: int = 1024           # Output dimension for voyage-3.5-lite
@@ -45,6 +47,9 @@ SENIORITY_MID: int = 2
 SENIORITY_SENIOR: int = 3
 
 YEARS_UNKNOWN: int = -1
+
+# LLM Fallback
+USE_LLM_FALLBACK: bool = os.getenv("USE_LLM_FALLBACK", "true").lower() == "true"
 
 # Generation
 OLLAMA_MODEL: str = "llama3.2:3b-instruct-q4_K_M"
