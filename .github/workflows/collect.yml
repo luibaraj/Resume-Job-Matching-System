@@ -1,0 +1,29 @@
+name: Collect Jobs
+on:
+  schedule:
+    - cron: '0 6 * * 1,3,5'  # Mon/Wed/Fri 6AM UTC
+  workflow_dispatch:
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: jobs-db
+          path: .
+        continue-on-error: true
+      - run: python -m data_pipeline.collect_jobs
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jobs-db
+          path: data/jobs.db
+          retention-days: 90

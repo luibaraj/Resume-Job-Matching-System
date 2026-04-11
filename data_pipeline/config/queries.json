@@ -1,0 +1,12 @@
+{
+  "queries": [
+    "AI engineer",
+    "machine learning engineer",
+    "data scientist"
+  ],
+  "pools": {
+    "jsearch": 38,
+    "flyby": 15,
+    "serpapi": 19
+  }
+}
