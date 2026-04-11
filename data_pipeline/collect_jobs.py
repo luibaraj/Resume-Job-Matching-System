@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-from data_pipeline.collectors import GreenhouseCollector, JSearchCollector, JobSearchCollector, JobsApiCollector, SerpApiCollector
+from data_pipeline.collectors import ArbeitnowCollector, GreenhouseCollector, JobicyCollector, JSearchCollector, JobSearchCollector, JobsApiCollector, SerpApiCollector
 from data_pipeline.db.migrate import main as run_migration
 
 logging.basicConfig(
@@ -85,6 +85,16 @@ class JobCollectionOrchestrator:
                 sa_jobs, sa_log = self._collect_serpapi(queries, queries_config)
                 all_jobs.extend(sa_jobs)
                 self.collection_log.append(sa_log)
+
+                # Arbeitnow (free, no auth)
+                an_jobs, an_log = self._collect_arbeitnow(queries_config)
+                all_jobs.extend(an_jobs)
+                self.collection_log.append(an_log)
+
+                # Jobicy (free, no auth)
+                jc_jobs, jc_log = self._collect_jobicy(queries, queries_config)
+                all_jobs.extend(jc_jobs)
+                self.collection_log.append(jc_log)
 
                 # Upsert all jobs
                 new_count = self._upsert_jobs(conn, all_jobs)
@@ -278,6 +288,71 @@ class JobCollectionOrchestrator:
             return [], {
                 "run_at": self.run_at,
                 "source": "jobsapi",
+                "jobs_found": 0,
+                "jobs_error": 1,
+                "requests": collector.requests_used,
+                "errors": "\n".join(errors_list),
+            }
+
+    def _collect_jobicy(self, queries: List[str], config: Dict) -> tuple:
+        """Collect from Jobicy (free, no auth)"""
+        logger.info("Starting Jobicy collection")
+        tags = config.get("jobicy_tags") or queries
+        collector = JobicyCollector(run_budget=config.get("pools", {}).get("jobicy", 12))
+        errors_list = []
+
+        try:
+            jobs = collector.collect_all(tags)
+            for job in jobs:
+                job["scraped_at"] = self.run_at
+
+            logger.info(f"Jobicy collected {len(jobs)} jobs (used {collector.requests_used} requests)")
+            return jobs, {
+                "run_at": self.run_at,
+                "source": "jobicy",
+                "jobs_found": len(jobs),
+                "requests": collector.requests_used,
+            }
+
+        except Exception as e:
+            error_msg = f"Jobicy error: {str(e)}"
+            logger.error(error_msg)
+            errors_list.append(error_msg)
+            return [], {
+                "run_at": self.run_at,
+                "source": "jobicy",
+                "jobs_found": 0,
+                "jobs_error": 1,
+                "requests": collector.requests_used,
+                "errors": "\n".join(errors_list),
+            }
+
+    def _collect_arbeitnow(self, config: Dict) -> tuple:
+        """Collect from Arbeitnow (free, no auth)"""
+        logger.info("Starting Arbeitnow collection")
+        collector = ArbeitnowCollector(run_budget=config.get("pools", {}).get("arbeitnow", 5))
+        errors_list = []
+
+        try:
+            jobs = collector.collect_all([""])  # no query needed
+            for job in jobs:
+                job["scraped_at"] = self.run_at
+
+            logger.info(f"Arbeitnow collected {len(jobs)} jobs (used {collector.requests_used} requests)")
+            return jobs, {
+                "run_at": self.run_at,
+                "source": "arbeitnow",
+                "jobs_found": len(jobs),
+                "requests": collector.requests_used,
+            }
+
+        except Exception as e:
+            error_msg = f"Arbeitnow error: {str(e)}"
+            logger.error(error_msg)
+            errors_list.append(error_msg)
+            return [], {
+                "run_at": self.run_at,
+                "source": "arbeitnow",
                 "jobs_found": 0,
                 "jobs_error": 1,
                 "requests": collector.requests_used,
