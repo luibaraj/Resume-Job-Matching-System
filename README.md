@@ -4,6 +4,14 @@ A RAG pipeline that matches resumes to job postings. Given a resume, the system 
 
 > **Scale note:** The data collection pipeline and FastAPI app are at minimum viable scale—enough to operationally test and validate the RAG system end-to-end. The corpus may not cover every role or industry, but the RAG pipeline itself will reliably surface the best matches within whatever jobs have been collected. Poor results are a corpus coverage problem, not a pipeline problem.
 
+## The Problem
+
+Job searching is a time sink. A typical job seeker spends hours every day manually scanning job boards, reading descriptions, and evaluating whether a role is actually a good fit—only to find out it isn't after writing a cover letter. This is a fundamentally inefficient process: the bottleneck isn't the jobs available, it's the matching.
+
+This system automates that matching. Upload your resume once, and instead of you searching through hundreds of postings, the pipeline searches for you—surfacing only the roles where your skills and experience are a genuine fit, with an explanation of why. What used to take hours of manual filtering takes seconds.
+
+The key insight is that job matching is a retrieval problem, not a search problem. You're not looking for jobs that contain certain keywords—you're looking for jobs where your *entire profile* aligns with the role's requirements. That's a much harder problem, and it's exactly what this system is built to solve.
+
 ## Why This Approach?
 
 Matching resumes to jobs is a retrieval problem: you need to find relevant jobs in a large corpus quickly. But raw semantic similarity alone isn't enough—a "Senior" job and a "Junior" resume might score high together despite the mismatch. This system uses a three-stage refinement:
