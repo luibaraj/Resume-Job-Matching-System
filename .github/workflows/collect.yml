@@ -13,10 +13,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: dawidd6/action-download-artifact@v9
         with:
           name: jobs-db
-          path: .
+          path: data/
+          workflow_conclusion: success
+          if_no_artifact_found: ignore
         continue-on-error: true
       - run: python -m data_pipeline.collect_jobs
         env:
