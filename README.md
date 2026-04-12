@@ -123,9 +123,9 @@ The system tracks completion with an `embedded=1` flag, making the process resum
 
 When a resume comes in, `src/retrieval.py` queries a ChromaDB instance that holds the job vectors in an HNSW (Hierarchical Navigable Small World) index. HNSW is a graph-based approximate nearest-neighbor algorithm—incredibly fast even with millions of vectors.
 
-The retrieval step is deliberately over-inclusive: it pulls the top 100 jobs by cosine distance. Why not just keep the top 10? Because filtering on metadata (degree, seniority, years) happens _before_ the dense search. If a resume specifies "senior + 5+ years experience required", we filter the corpus first, then search within that subset. This avoids retrieving mismatches upfront.
+The retrieval step is deliberately over-inclusive: it pulls the top 100 jobs by cosine distance. Optional metadata filters (degree, seniority, years) are applied _during_ the vector search as a ChromaDB `where` filter—ChromaDB evaluates both the vector distance and the filter condition together, so only jobs matching the filter are considered for the top-100 result set.
 
-The HNSW index is tuned with `ef_construction=400` (effort during indexing) and `ef=400` (effort during search), trading a bit of speed for higher recall—you want to catch all the good matches now, not miss them.
+The HNSW index uses `ef=400` during search (configured in `src/config.py`), trading a bit of speed for higher recall. The index build parameter `ef_construction` defaults to `100`; it can be raised by passing a higher value to `build_collection()` if you want better index quality at the cost of a slower build.
 
 ### Stage 5: Reranking with a Cross-Encoder
 
@@ -146,9 +146,9 @@ The full generation pipeline in `src/generation.py` works like this:
 3. **Filter hallucinations:** Verify that any mentioned skill actually appears in the job description (span-in-text check)
 4. **Generate explanation:** LLM summarizes the matches in plain English
 
-If the LLM times out or errors, the system falls back to a direct prompt that returns a generic explanation based on the job title and description.
+If the generation pipeline errors, the system falls back to a direct Ollama call using the first 500 characters of the resume and job description to produce a shorter, less grounded explanation.
 
-For safety, resumes longer than 8000 characters get truncated before passing to the LLM. The model uses temperature 0.7 (enough variation for naturalness, but still deterministic) and nucleus sampling (top-p 0.9).
+The system logs a warning when resumes or job descriptions exceed 8000 characters, but does not truncate—the full text is passed to the model. The model uses temperature 0.7 (enough variation for naturalness, but still deterministic) and nucleus sampling (top-p 0.9).
 
 ## API Reference
 
@@ -170,7 +170,7 @@ Checks:
 
 - SQLite database is reachable and contains the `jobs` table
 - ChromaDB vector index is reachable
-- VoyageAI API key is set and the service is responsive
+- VoyageAI is responsive (makes a live test embed call, not just a key presence check)
 - Ollama is running and has the required LLM model loaded
 
 ```bash
@@ -204,7 +204,7 @@ The main endpoint. Takes a resume and returns the best job matches with explanat
       "company_name": "Example Corp",
       "score": 0.95,
       "explanation": "Your 5+ years of Python and Kubernetes experience matches...",
-      "absolute_url": "https://example.com/jobs/42"
+      "absolute_url": "https://example.com/jobs/42"  // source_url from the job posting
     }
   ],
   "resume_id": "abc123-...",
@@ -212,7 +212,7 @@ The main endpoint. Takes a resume and returns the best job matches with explanat
 }
 ```
 
-The `corpus_warning` field is set when no matches were found. This is a corpus coverage issue—the collected jobs may be too few or too narrow for certain roles—not a signal that the resume is a poor fit. The RAG pipeline will reliably return the best available matches; if results feel thin, expanding the corpus is the fix.
+The `corpus_warning` field is set when the generation pipeline finds no validated skill-match pairs between the resume and a job—meaning the LLM couldn't confirm a concrete skill overlap. This can happen even when jobs are returned. It's a signal that the corpus may be too narrow for this candidate's profile, not that the resume is a poor fit. If results feel thin, expanding the corpus is the fix.
 
 **Example:**
 
@@ -244,27 +244,38 @@ ollama pull llama3.2:3b-instruct-q4_K_M
 
 ### Production Setup (Docker Compose)
 
-1. **Build the job corpus.** This is a one-time step (or re-run as needed):
+The fastest path to a running system is to download the pre-built job database from the GitHub Actions cron run rather than running the full collection pipeline yourself.
+
+1. **Download the latest job database.** Go to the [Actions tab](https://github.com/luibaraj/Resume-Job-Matching-System/actions/workflows/collect.yml), open the most recent successful `Collect Jobs` run, and download the `jobs-db` artifact. Unzip it and place `jobs.db` in the `data/` directory:
 
    ```bash
-   # Collect jobs from 8 sources
-   python -m data_pipeline.collect_jobs
-
-   # Clean them
-   python scripts/pipeline/preprocess_jobs.py
-
-   # Embed them
-   python scripts/pipeline/embed_jobs.py
+   mkdir -p data
+   mv ~/Downloads/jobs.db data/jobs.db
    ```
 
-2. **Configure environment:**
+2. **Preprocess and embed the jobs.** This cleans the raw descriptions and builds the ChromaDB vector index. You need `VOYAGE_API_KEY` for the embedding step:
+
+   ```bash
+   python scripts/pipeline/preprocess_jobs.py
+   VOYAGE_API_KEY=your_key python scripts/pipeline/embed_jobs.py
+   ```
+
+   The embedding step writes vectors to `data/chroma/` — this is what the API queries at runtime.
+
+3. **Pull the Ollama model on your host:**
+
+   ```bash
+   ollama pull llama3.2:3b-instruct-q4_K_M
+   ```
+
+4. **Configure environment:**
 
    ```bash
    cp .env.example .env
-   # Edit .env and add your API keys
+   # Fill in at minimum: VOYAGE_API_KEY, COHERE_API_KEY
    ```
 
-3. **Start the services:**
+5. **Start the services:**
 
    ```bash
    docker-compose up -d
@@ -274,13 +285,14 @@ ollama pull llama3.2:3b-instruct-q4_K_M
    - FastAPI app on port 8000 (with SQLite + ChromaDB mounted to `./data`)
    - Nginx reverse proxy on port 80
 
-4. **Verify everything is healthy:**
+6. **Verify everything is healthy:**
 
    ```bash
    curl http://localhost/ready
    ```
 
-5. **Try a request:**
+7. **Try a request:**
+
    ```bash
    curl -X POST http://localhost/match \
      -H "Content-Type: application/json" \
