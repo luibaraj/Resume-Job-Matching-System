@@ -27,8 +27,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from src.config import YEARS_UNKNOWN
-from src.eval.positive_gen.positives_pipeline import run_pipeline
-from src.eval.positive_gen.positives_validate import ResumeInfo
+from eval.positive_gen.positives_pipeline import run_pipeline
+from eval.positive_gen.positives_validate import ResumeInfo
 from src.llm_extraction import extract_years_with_llm
 
 logger = logging.getLogger(__name__)

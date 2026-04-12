@@ -124,7 +124,7 @@ class TestCallOllamaValidateRetry:
     def test_validate_has_retry_logic(self) -> None:
         """call_ollama_validate includes retry logic with exponential backoff."""
         # Verify source code directly to avoid circular import
-        eval_utils_path = Path(__file__).parent.parent / "src" / "eval" / "eval_utils.py"
+        eval_utils_path = Path(__file__).parent.parent / "eval" / "eval_utils.py"
         source = eval_utils_path.read_text()
         # Find call_ollama_validate function
         func_start = source.index("def call_ollama_validate")
@@ -144,7 +144,7 @@ class TestCallOllamaRepairRetry:
     def test_repair_has_retry_logic_with_2_attempts(self) -> None:
         """call_ollama_repair includes retry logic with 2 attempts."""
         # Verify source code directly to avoid circular import
-        eval_utils_path = Path(__file__).parent.parent / "src" / "eval" / "eval_utils.py"
+        eval_utils_path = Path(__file__).parent.parent / "eval" / "eval_utils.py"
         source = eval_utils_path.read_text()
         # Find call_ollama_repair function
         func_start = source.index("def call_ollama_repair")

@@ -35,13 +35,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ollama
 
 from src.config import OLLAMA_MODEL
-from src.eval.negative_gen.negatives_gen import (
+from eval.negative_gen.negatives_gen import (
     generate_mismatched_skeleton,
     MismatchType,
 )
-from src.eval.negative_gen.negatives_validate import validate_mismatched_skeleton
-from src.eval.negative_gen.negatives_repair import repair_mismatched_skeleton
-from src.eval.positive_gen.positives_validate import ResumeInfo
+from eval.negative_gen.negatives_validate import validate_mismatched_skeleton
+from eval.negative_gen.negatives_repair import repair_mismatched_skeleton
+from eval.positive_gen.positives_validate import ResumeInfo
 
 # Reuse helpers from the positives script
 from scripts.eval.generate_synthetic_positives import (

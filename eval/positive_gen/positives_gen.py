@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import ollama
 
-from src.eval.types import JobSkeleton
+from eval.types import JobSkeleton
 
 # Allow running as a script from any working directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 import mlflow
-from src.eval import eval_config, metrics, types
+from eval import eval_config, metrics, types
 
 logger = logging.getLogger(__name__)
 

@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 # Add project root to path so we can import from src/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from src.config import DB_DEFAULT_PATH
-from src.greenhouse_scraper import scrape_greenhouse_board, GreenhouseJob
+from data_pipeline.collectors.greenhouse_scraper import scrape_greenhouse_board, GreenhouseJob
 
 logger = logging.getLogger(__name__)
 

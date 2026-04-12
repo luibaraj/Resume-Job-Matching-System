@@ -14,7 +14,7 @@ import pandas as pd
 
 from src import config
 from src import embedding
-from src.eval import eval_config
+from eval import eval_config
 
 logger = logging.getLogger(__name__)
 

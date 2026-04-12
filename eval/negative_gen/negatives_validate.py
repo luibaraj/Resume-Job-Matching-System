@@ -22,9 +22,9 @@ from src.config import (
     OLLAMA_MODEL,
     VALIDATION_MAX_TOKENS,
 )
-from src.eval.eval_utils import call_ollama_validate
-from src.eval.positive_gen.positives_gen import JobSkeleton
-from src.eval.positive_gen.positives_validate import (
+from eval.eval_utils import call_ollama_validate
+from eval.positive_gen.positives_gen import JobSkeleton
+from eval.positive_gen.positives_validate import (
     ResumeInfo,
     ValidationResult,
     _normalize_skeleton,

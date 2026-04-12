@@ -1,6 +1,6 @@
 {
   "pythonVersion": "3.11",
-  "include": ["src"],
+  "include": ["src", "fastapi_app", "data_pipeline", "eval"],
   "exclude": ["venv", "tests", "scripts/eval"],
   "extraPaths": ["./src"],
   "typeCheckingMode": "basic",

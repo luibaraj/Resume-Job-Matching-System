@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.greenhouse_scraper import (
+from data_pipeline.collectors.greenhouse_scraper import (
     GreenhouseScraper,
     GreenhouseJob,
     GreenhouseJobBoardDiscovery,
@@ -205,7 +205,7 @@ class TestGreenhouseScraper:
         assert job is not None
         assert job.job_type is None
 
-    @patch('src.greenhouse_scraper.requests.Session.get')
+    @patch('data_pipeline.collectors.greenhouse_scraper.requests.Session.get')
     def test_fetch_jobs_success(self, mock_get, scraper, sample_job_data):
         """Test successful job fetching."""
         mock_response = MagicMock()
@@ -219,7 +219,7 @@ class TestGreenhouseScraper:
         assert jobs[0].title == 'Software Engineer'
         assert mock_get.call_count == 1  # Single API call, no pagination
 
-    @patch('src.greenhouse_scraper.requests.Session.get')
+    @patch('data_pipeline.collectors.greenhouse_scraper.requests.Session.get')
     def test_fetch_jobs_api_error(self, mock_get, scraper):
         """Test handling of API errors."""
         mock_get.side_effect = requests.exceptions.RequestException("API Error")
@@ -227,7 +227,7 @@ class TestGreenhouseScraper:
         with pytest.raises(requests.exceptions.RequestException):
             scraper.fetch_jobs()
 
-    @patch('src.greenhouse_scraper.requests.Session.get')
+    @patch('data_pipeline.collectors.greenhouse_scraper.requests.Session.get')
     def test_fetch_jobs_empty_response(self, mock_get, scraper):
         """Test handling of empty response."""
         mock_response = MagicMock()
@@ -279,7 +279,7 @@ class TestGreenhouseJobBoardDiscovery:
 class TestConvenienceFunction:
     """Tests for convenience functions."""
 
-    @patch('src.greenhouse_scraper.GreenhouseScraper.fetch_jobs')
+    @patch('data_pipeline.collectors.greenhouse_scraper.GreenhouseScraper.fetch_jobs')
     def test_scrape_greenhouse_board(self, mock_fetch):
         """Test convenience function."""
         mock_fetch.return_value = []
@@ -289,7 +289,7 @@ class TestConvenienceFunction:
         assert jobs == []
         mock_fetch.assert_called_once()
 
-    @patch('src.greenhouse_scraper.GreenhouseScraper.fetch_jobs')
+    @patch('data_pipeline.collectors.greenhouse_scraper.GreenhouseScraper.fetch_jobs')
     def test_scrape_greenhouse_board_with_days_filter(self, mock_fetch):
         """Test convenience function with days filter."""
         mock_fetch.return_value = []

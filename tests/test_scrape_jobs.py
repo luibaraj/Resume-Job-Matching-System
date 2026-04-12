@@ -19,7 +19,7 @@ from scrape_jobs import (
     write_jobs_to_db,
     scrape_board_safe,
 )
-from src.greenhouse_scraper import GreenhouseJob
+from data_pipeline.collectors.greenhouse_scraper import GreenhouseJob
 
 
 @pytest.fixture

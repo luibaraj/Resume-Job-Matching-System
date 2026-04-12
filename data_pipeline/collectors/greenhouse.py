@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from src.greenhouse_scraper import GreenhouseScraper
+from data_pipeline.collectors.greenhouse_scraper import GreenhouseScraper
 
 logger = logging.getLogger(__name__)
 

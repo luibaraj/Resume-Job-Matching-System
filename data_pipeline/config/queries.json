@@ -2,7 +2,15 @@
   "queries": [
     "AI engineer",
     "machine learning engineer",
-    "data scientist"
+    "data scientist",
+    "LLM engineer",
+    "NLP engineer",
+    "AI researcher",
+    "deep learning engineer",
+    "data engineer",
+    "MLOps engineer",
+    "analytics engineer",
+    "computer vision engineer"
   ],
   "pools": {
     "jsearch": 38,
