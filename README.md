@@ -278,12 +278,10 @@ The fastest path to a running system is to download the pre-built job database f
 5. **Start the services:**
 
    ```bash
-   docker-compose up -d
+   ./start-services.sh
    ```
 
-   This spins up:
-   - FastAPI app on port 8000 (with SQLite + ChromaDB mounted to `./data`)
-   - Nginx reverse proxy on port 80
+   This starts Ollama on the host, waits for it to be ready, builds and starts the Docker Compose services (FastAPI on port 8000, Nginx on port 80), and opens the UI in your browser when everything is up.
 
 6. **Verify everything is healthy:**
 
